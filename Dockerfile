@@ -2,9 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /
 
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install --yes --no-install-recommends curl gcc libc-dev libffi-dev && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install poetry
+RUN pip3 install --no-cache-dir poetry==1.8.5
 # https://github.com/rust-lang/cargo/issues/8719#issuecomment-1253575253
 #ENV PATH=/root/.cargo/bin:$PATH
 #RUN --mount=type=tmpfs,target=/root/.cargo curl https://sh.rustup.rs -sSf | bash -s -- -y && pip install poetry
@@ -13,7 +14,7 @@ COPY poetry.lock /
 COPY pyproject.toml /
 
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-dev --no-ansi
+    poetry install --no-interaction --only main --no-ansi --no-root
 
 FROM python:3.11-slim
 

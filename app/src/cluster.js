@@ -1,188 +1,313 @@
-import { Node, isMaster } from './node.js'
+import { Node, getNodePoolType, getPoolColor, getNodeAZ, POOL_PRIORITY } from './node.js'
 import { Pod } from './pod.js'
 import App from './app.js'
 const PIXI = require('pixi.js')
 
 export default class Cluster extends PIXI.Graphics {
-    constructor (cluster, status, tooltip, config) {
-        super()
-        this.cluster = cluster
-        this.status = status
-        this.tooltip = tooltip
-        this.config = config
+  constructor(cluster, status, tooltip, config) {
+    super()
+    this.cluster = cluster
+    this.status = status
+    this.tooltip = tooltip
+    this.config = config
+  }
+
+  destroy() {
+    if (this.tick) {
+      PIXI.ticker.shared.remove(this.tick, this)
+    }
+    super.destroy()
+  }
+
+  pulsate(_time) {
+    const v = Math.sin((PIXI.ticker.shared.lastTime % 1000) / 1000. * Math.PI)
+    this.alpha = 0.4 + (v * 0.6)
+  }
+
+  /**
+   * Groups nodes by their pool type and AZ, and calculates sizing for each pool
+   * @returns {Object} - Object with pool names as keys, containing AZ groups and sizing info
+   */
+  groupNodesByPool() {
+    const pools = {}
+
+    // First pass: group nodes by pool type and AZ, find max pods per pool
+    for (const node of Object.values(this.cluster.nodes)) {
+      const poolType = getNodePoolType(node.labels)
+      const az = getNodeAZ(node.labels)
+
+      if (!pools[poolType]) {
+        pools[poolType] = {
+          azGroups: {},  // Group nodes by AZ within the pool
+          maxPods: 0,
+          podsPerRow: 0,
+          widthPx: 0,
+          heightPx: 0,
+          color: getPoolColor(poolType)
+        }
+      }
+
+      // Group by AZ within the pool
+      if (!pools[poolType].azGroups[az]) {
+        pools[poolType].azGroups[az] = []
+      }
+      pools[poolType].azGroups[az].push(node)
+
+      const podsInNode = Object.values(node.pods).length
+      if (podsInNode > pools[poolType].maxPods) {
+        pools[poolType].maxPods = podsInNode
+      }
     }
 
-    destroy() {
-        if (this.tick) {
-            PIXI.ticker.shared.remove(this.tick, this)
-        }
-        super.destroy()
+    // Second pass: calculate sizing for each pool and sort nodes within AZ groups
+    for (const poolType in pools) {
+      const pool = pools[poolType]
+
+      pool.podsPerRow = Math.max(
+        App.current.defaultPodsPerRow,
+        Math.ceil(Math.sqrt(pool.maxPods))
+      )
+
+      pool.widthPx = Math.max(
+        App.current.defaultWidthOfNodePx,
+        Math.floor(pool.podsPerRow * App.current.sizeOfPodPx + App.current.startDrawingPodsAt + 2)
+      )
+
+      pool.heightPx = Math.max(
+        App.current.defaultHeightOfNodePx,
+        Math.floor(pool.podsPerRow * App.current.sizeOfPodPx + App.current.heightOfTopHandlePx + (App.current.sizeOfPodPx * 2) + 2)
+      )
+
+      // Sort nodes within each AZ group by name
+      for (const az in pool.azGroups) {
+        pool.azGroups[az].sort((a, b) => a.name.localeCompare(b.name))
+      }
+
+      // Store sorted AZ names for consistent rendering
+      pool.sortedAZs = Object.keys(pool.azGroups).sort()
     }
 
-    pulsate(_time) {
-        const v = Math.sin((PIXI.ticker.shared.lastTime % 1000) / 1000. * Math.PI)
-        this.alpha = 0.4 + (v * 0.6)
+    return pools
+  }
+
+  /**
+   * Sorts pool types by priority (master first, then infra, then workers)
+   * @param {string[]} poolTypes - Array of pool type names
+   * @returns {string[]} - Sorted array
+   */
+  sortPoolTypes(poolTypes) {
+    return poolTypes.sort((a, b) => {
+      const priorityA = a in POOL_PRIORITY ? POOL_PRIORITY[a] : POOL_PRIORITY['default']
+      const priorityB = b in POOL_PRIORITY ? POOL_PRIORITY[b] : POOL_PRIORITY['default']
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB
+      }
+      // Same priority, sort alphabetically
+      return a.localeCompare(b)
+    })
+  }
+
+  draw() {
+    this.removeChildren()
+    this.clear()
+
+    const left = 10
+    const top = 20
+    const padding = 5
+    const poolHeaderHeight = 16  // Height for pool type label row
+    const azHeaderHeight = 14    // Height for AZ label
+    const azColumnPadding = 8    // Extra padding between AZ columns
+    const nodesPerRowInAZ = 3    // Max nodes per row within an AZ before wrapping
+
+    // Group nodes by pool type and AZ
+    const pools = this.groupNodesByPool()
+    const sortedPoolTypes = this.sortPoolTypes(Object.keys(pools))
+
+    let currentY = top
+    let overallMaxX = left
+    const poolHeaders = []
+    const azHeaders = []
+
+    // Render each pool as a separate row
+    for (const poolType of sortedPoolTypes) {
+      const pool = pools[poolType]
+      const poolColor = pool.color
+      const sortedAZs = pool.sortedAZs
+
+      // Count total nodes in this pool
+      let totalNodesInPool = 0
+      for (const az of sortedAZs) {
+        totalNodesInPool += pool.azGroups[az].length
+      }
+
+      // Add pool header/label
+      const poolHeader = new PIXI.Graphics()
+      poolHeader.beginFill(poolColor, 0.3)
+      poolHeader.lineStyle(1, poolColor, 0.8)
+      poolHeader.drawRect(0, 0, 200, poolHeaderHeight)  // Width will be adjusted later
+      poolHeader.endFill()
+
+      const poolLabel = new PIXI.Text(
+        `${poolType.toUpperCase()} (${totalNodesInPool})`,
+        { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0xffffff }
+      )
+      poolLabel.x = 4
+      poolLabel.y = 2
+      poolHeader.addChild(poolLabel)
+      poolHeader.y = currentY
+      poolHeader.x = left
+      poolHeaders.push({ header: poolHeader, poolType: poolType })
+
+      currentY += poolHeaderHeight + 2
+
+      // Check if we have multiple AZs (show AZ headers only if more than one)
+      const showAZHeaders = sortedAZs.length > 1 || (sortedAZs.length === 1 && sortedAZs[0] !== 'unknown')
+
+      if (showAZHeaders) {
+        currentY += azHeaderHeight + 2
+      }
+
+      // Track pool dimensions
+      const poolStartY = currentY
+      let poolMaxHeight = 0
+      let azStartX = left
+
+      // Render each AZ as a column within the pool row
+      for (const az of sortedAZs) {
+        const nodesInAZ = pool.azGroups[az]
+
+        // Calculate grid dimensions for this AZ
+        const azCols = Math.min(nodesPerRowInAZ, nodesInAZ.length)
+        const azRows = Math.ceil(nodesInAZ.length / nodesPerRowInAZ)
+        const azWidthPx = azCols * (pool.widthPx + padding) - padding
+
+        // Add AZ header if showing
+        if (showAZHeaders) {
+          const azHeader = new PIXI.Graphics()
+          azHeader.beginFill(poolColor, 0.15)
+          azHeader.lineStyle(1, poolColor, 0.4)
+          azHeader.drawRect(0, 0, azWidthPx, azHeaderHeight)
+          azHeader.endFill()
+
+          // Truncate AZ name if too long
+          const maxAZChars = Math.floor(azWidthPx / 6)
+          const displayAZ = az.length > maxAZChars ? az.substring(az.length - maxAZChars) : az
+
+          const azLabel = new PIXI.Text(
+            `${displayAZ} (${nodesInAZ.length})`,
+            { fontFamily: 'ShareTechMono', fontSize: 9, fill: 0xcccccc }
+          )
+          azLabel.x = 3
+          azLabel.y = 1
+          azHeader.addChild(azLabel)
+          azHeader.x = azStartX
+          azHeader.y = poolStartY - azHeaderHeight - 2
+          azHeaders.push(azHeader)
+        }
+
+        // Render nodes in a grid within this AZ (up to nodesPerRowInAZ columns)
+        for (let nodeIdx = 0; nodeIdx < nodesInAZ.length; nodeIdx++) {
+          const node = nodesInAZ[nodeIdx]
+          const col = nodeIdx % nodesPerRowInAZ
+          const row = Math.floor(nodeIdx / nodesPerRowInAZ)
+
+          const nodeBox = new Node(node, this, this.tooltip, pool.podsPerRow, pool.widthPx, pool.heightPx, poolColor)
+          nodeBox.draw()
+
+          nodeBox.x = azStartX + col * (pool.widthPx + padding)
+          nodeBox.y = poolStartY + row * (pool.heightPx + padding)
+
+          this.addChild(nodeBox)
+        }
+
+        // Calculate the height of this AZ's grid
+        const azColumnHeight = azRows * (pool.heightPx + padding)
+
+        // Track max column height for this pool
+        if (azColumnHeight > poolMaxHeight) {
+          poolMaxHeight = azColumnHeight
+        }
+
+        // Move to next AZ group (width based on actual columns used)
+        azStartX += azWidthPx + azColumnPadding
+      }
+
+      // Track the rightmost point
+      if (azStartX > overallMaxX) {
+        overallMaxX = azStartX
+      }
+
+      // Move currentY past this pool's content
+      currentY = poolStartY + poolMaxHeight + 5  // Extra spacing between pools
     }
 
-    draw () {
-        this.removeChildren()
-        this.clear()
-        const left = 10
-        const top = 20
-        const padding = 5
-        let masterX = left
-        let masterY = top
-        let masterWidth = 0
-        let masterHeight = 0
-        let workerX = left
-        let workerY = top
-        let workerWidth = 0
-        let workerHeight = 0
-        const workerNodes = []
-
-        let maxPodsInWorkers = 0
-        let maxPodsInMasters = 0
-        // get the largest number of pods (workers and masters)
-        for (const n of Object.values(this.cluster.nodes)) {
-            const podsInNode = Object.values(n.pods).length
-
-            if (isMaster(n.labels)) {
-                if (podsInNode >= maxPodsInMasters) {
-                    maxPodsInMasters = podsInNode
-                }
-            } else {
-                if (podsInNode >= maxPodsInWorkers) {
-                    maxPodsInWorkers = podsInNode
-                }
-            }
-        }
-
-        // with maxPodsInWorkers we can calculate the size of all nodes in the cluster
-        this.podsPerRowWorker = Math.max(
-            App.current.defaultPodsPerRow,
-            Math.ceil(Math.sqrt(maxPodsInWorkers))
-        )
-        this.podsPerRowMaster = Math.max(
-            App.current.defaultPodsPerRow,
-            Math.ceil(Math.sqrt(maxPodsInMasters))
-        )
-
-        this.widthOfWorkerNodePx = Math.max(
-            App.current.defaultWidthOfNodePx,
-            Math.floor(this.podsPerRowWorker * App.current.sizeOfPodPx + App.current.startDrawingPodsAt + 2)
-        )
-        this.widthOfMasterNodePx = Math.max(
-            App.current.defaultWidthOfNodePx,
-            Math.floor(this.podsPerRowMaster * App.current.sizeOfPodPx + App.current.startDrawingPodsAt + 2)
-        )
-
-        this.heightOfWorkerNodePx = Math.max(
-            App.current.defaultHeightOfNodePx,
-            Math.floor(this.podsPerRowWorker * App.current.sizeOfPodPx + App.current.heightOfTopHandlePx + (App.current.sizeOfPodPx * 2) + 2)
-        )
-        this.heightOfMasterNodePx = Math.max(
-            App.current.defaultHeightOfNodePx,
-            Math.floor(this.podsPerRowMaster * App.current.sizeOfPodPx + App.current.heightOfTopHandlePx + (App.current.sizeOfPodPx * 2) + 2)
-        )
-
-        const maxWidth = (window.innerWidth * (1/this.config.initialScale)) - (this.heightOfWorkerNodePx * 1.2)
-
-        for (const nodeName of Object.keys(this.cluster.nodes).sort()) {
-            const node = this.cluster.nodes[nodeName]
-            let nodeBox = null
-
-            if (isMaster(node.labels)) {
-                nodeBox = new Node(node, this, this.tooltip, this.podsPerRowMaster, this.widthOfMasterNodePx, this.heightOfMasterNodePx)
-                nodeBox.draw()
-
-                if (masterX > maxWidth) {
-                    masterWidth = masterX
-                    masterX = left
-                    masterY += this.heightOfMasterNodePx + padding
-                    masterHeight += this.heightOfMasterNodePx + padding
-                }
-                if (masterHeight == 0) {
-                    masterHeight = this.heightOfMasterNodePx + padding
-                }
-                nodeBox.x = masterX
-                nodeBox.y = masterY
-                masterX += this.widthOfMasterNodePx + padding
-            } else {
-                nodeBox = new Node(node, this, this.tooltip, this.podsPerRowWorker, this.widthOfWorkerNodePx, this.heightOfWorkerNodePx)
-                nodeBox.draw()
-
-                if (workerX > maxWidth) {
-                    workerWidth = workerX
-                    workerX = left
-                    workerY += this.heightOfWorkerNodePx + padding
-                    workerHeight += this.heightOfWorkerNodePx + padding
-                }
-                workerNodes.push(nodeBox)
-                if (workerHeight == 0) {
-                    workerHeight = this.heightOfWorkerNodePx + padding
-                }
-                nodeBox.x = workerX
-                nodeBox.y = workerY
-                workerX += this.widthOfWorkerNodePx + padding
-            }
-            this.addChild(nodeBox)
-        }
-        for (const nodeBox of workerNodes) {
-            nodeBox.y += masterHeight
-        }
-
-        /*
-            Place unassigned pods to the right of the master nodes, or
-            to the right of the worker nodes if there were no masters.
-         */
-        var unassignedX = masterX === left ? workerX : masterX
-
-        for (const pod of Object.values(this.cluster.unassigned_pods)) {
-            var podBox = Pod.getOrCreate(pod, this, this.tooltip)
-            podBox.x = unassignedX
-            podBox.y = masterY
-            podBox.draw()
-            this.addChild(podBox)
-            unassignedX += 20
-        }
-
-        this.lineStyle(2, App.current.theme.primaryColor, 1)
-        const width = Math.max(masterX, masterWidth, workerX, workerWidth, unassignedX)
-        this.drawRect(0, 0, width, top + masterHeight + workerHeight)
-
-        const topHandle = this.topHandle = new PIXI.Graphics()
-        topHandle.beginFill(App.current.theme.primaryColor, 1)
-        topHandle.drawRect(0, 0, width, App.current.heightOfTopHandlePx)
-        topHandle.endFill()
-        topHandle.interactive = true
-        topHandle.buttonMode = true
-        const that = this
-        topHandle.on('click', function(_event) {
-            App.current.toggleCluster(that.cluster.id)
-        })
-        const text = new PIXI.Text(''.concat(this.cluster.api_server_url, ' (', this.cluster.id, ')'), {fontFamily: 'ShareTechMono', fontSize: 10, fill: 0x000000})
-        text.x = 2
-        text.y = 2
-        topHandle.addChild(text)
-        this.addChild(topHandle)
-
-        let newTick = null
-        const nowSeconds = Date.now() / 1000
-        if (this.status && this.status.last_query_time < nowSeconds - 20) {
-            newTick = this.pulsate
-        }
-
-        if (newTick && newTick != this.tick) {
-            this.tick = newTick
-            // important: only register new listener if it does not exist yet!
-            // (otherwise we leak listeners)
-            PIXI.ticker.shared.add(this.tick, this)
-        } else if (!newTick && this.tick) {
-            PIXI.ticker.shared.remove(this.tick, this)
-            this.tick = null
-            this.alpha = 1
-            this.tint = 0xffffff
-        }
+    // Update pool header widths and add them
+    for (const { header } of poolHeaders) {
+      header.width = overallMaxX - left
+      this.addChild(header)
     }
 
+    // Add AZ headers
+    for (const azHeader of azHeaders) {
+      this.addChild(azHeader)
+    }
+
+    // Place unassigned pods
+    let unassignedX = overallMaxX + 10
+    const unassignedY = top + poolHeaderHeight + 2
+
+    for (const pod of Object.values(this.cluster.unassigned_pods)) {
+      const podBox = Pod.getOrCreate(pod, this, this.tooltip)
+      podBox.x = unassignedX
+      podBox.y = unassignedY
+      podBox.draw()
+      this.addChild(podBox)
+      unassignedX += 20
+    }
+
+    // Update overall width if unassigned pods extend it
+    if (unassignedX > overallMaxX) {
+      overallMaxX = unassignedX
+    }
+
+    // Draw cluster border
+    this.lineStyle(2, App.current.theme.primaryColor, 1)
+    const width = overallMaxX
+    const height = currentY - padding
+    this.drawRect(0, 0, width, height)
+
+    // Draw cluster top handle
+    const topHandle = this.topHandle = new PIXI.Graphics()
+    topHandle.beginFill(App.current.theme.primaryColor, 1)
+    topHandle.drawRect(0, 0, width, App.current.heightOfTopHandlePx)
+    topHandle.endFill()
+    topHandle.interactive = true
+    topHandle.buttonMode = true
+    const that = this
+    topHandle.on('click', function (_event) {
+      App.current.toggleCluster(that.cluster.id)
+    })
+    const text = new PIXI.Text(''.concat(this.cluster.api_server_url, ' (', this.cluster.id, ')'), { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0x000000 })
+    text.x = 2
+    text.y = 2
+    topHandle.addChild(text)
+    this.addChild(topHandle)
+
+    // Handle stale data pulsating
+    let newTick = null
+    const nowSeconds = Date.now() / 1000
+    if (this.status && this.status.last_query_time < nowSeconds - 20) {
+      newTick = this.pulsate
+    }
+
+    if (newTick && newTick != this.tick) {
+      this.tick = newTick
+      PIXI.ticker.shared.add(this.tick, this)
+    } else if (!newTick && this.tick) {
+      PIXI.ticker.shared.remove(this.tick, this)
+      this.tick = null
+      this.alpha = 1
+      this.tint = 0xffffff
+    }
+  }
 }
