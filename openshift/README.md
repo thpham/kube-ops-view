@@ -1,18 +1,28 @@
-### Directory [deploy](deploy) contains a standard deployment for Openshift 4.x (3.x is also working)
+# OpenShift Deployment
 
-- Changes from the original
-  - standard namespace is ocp-ops-view instead of default
-  - create the namespace with an infra node selector, this is technically not necessary but nice to have
-  - RunAsUser and RunAsNonRoot removed from kube-ops-view and redis deployment, Openshift deployments run with a random uid, choosing a specific one is unnecessary
-  - added an emptydir to redis to create a directory which is writeable for the random user
-  - added an edge encrypt route to expose the service via TLS only + redirect from port 80
-  - set requests and limits a bit higher, your mileage may vary
+This fork uses the OAuth proxy deployment to protect kube-ops-view from unauthorized access.
 
-### Directory [deploy-with-oauth-proxy](deploy-with-oauth-oauth-proxy) contains an additional oauth proxy to protect the application from unauthorized access
+## Directory [deploy](deploy)
 
-- Change from Openshift deploy
-  - switched to reencrypt route to be able to use the service CA
-  - added Openshift oauth proxy as a sidecar
-  - added necessary service annotation for the Openshift oauth proxy
-  - added service CA certificate to the proxy service to encrypt traffic between router and proxy
-  - all users with permission to read the namespace are allowed to use the service by the oauth proxy
+Standard deployment with OpenShift OAuth proxy sidecar for authentication.
+
+### Features
+
+- Namespace: `ocp-ops-view`
+- OpenShift OAuth proxy sidecar for authentication
+- Users with permission to read the namespace are allowed access
+- Reencrypt route using OpenShift service CA
+- Infra node tolerations
+- Restricted security context (non-root, read-only filesystem)
+
+### Deployment
+
+```bash
+oc apply -k deploy/
+```
+
+### Configuration
+
+- Image: `ghcr.io/thpham/kube-ops-view:24`
+- Redis backend for state persistence
+- TLS encryption between router and application

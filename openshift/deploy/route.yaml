@@ -1,14 +1,14 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: proxy
+  name: ocp-ops-view
 spec:
   host: ocp-ops-view.apps.<cluster.domain>
   port:
-    targetPort: 8080
+    targetPort: https
   to:
     kind: Service
-    name: kube-ops-view
+    name: ocp-ops-view
   tls:
     insecureEdgeTerminationPolicy: Redirect
-    termination: edge
+    termination: reencrypt
