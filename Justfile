@@ -1,75 +1,237 @@
-# Default image and version settings
-image := env("IMAGE", "tpham/kube-ops-view")
-version := `git describe --tags --always --dirty`
+# ============================================================================
+# Kube-Ops-View Justfile
+# ============================================================================
+
+set dotenv-load := true
+
+# Configuration
+image := env("IMAGE", "ghcr.io/thpham/kube-ops-view")
+version := `git describe --tags --always --dirty 2>/dev/null || echo "dev"`
 tag := env("TAG", version)
 platforms := env("PLATFORMS", "linux/amd64,linux/arm64")
+node_image := "node:lts-slim"
+container_prefix := "kube-ops-view"
 
-# Default recipe
-default: docker
+# ============================================================================
+# Help & Default
+# ============================================================================
+
+# Show available recipes
+default:
+    @just --list
+
+# ============================================================================
+# Development Workflow
+# ============================================================================
+
+# Install all dependencies (Python + Node)
+install: install-python install-node
 
 # Install Python dependencies
-install:
+install-python:
     poetry install
 
-# Clean build artifacts
-clean:
-    rm -fr kube_ops_view/static/build
+# Install Node dependencies
+install-node:
+    @just _node "npm install"
 
-# Run linting
-lint: install
+# Run linting (Python + JS)
+lint: install-python
     poetry run pre-commit run --all-files
 
-# Run tests with coverage
+# Run Python tests with coverage
 test: lint
     poetry run coverage run --source=kube_ops_view -m pytest -v
     poetry run coverage report
 
-# Update version in deployment files
-version:
-    sed -i '' "s/kube-ops-view:.*/kube-ops-view:{{version}}/" deploy/*.yaml
+# Watch frontend for development (rebuilds on changes)
+watch:
+    @just _node "npm run start"
 
-# Build frontend JavaScript app
-appjs:
-    docker run -u $(id -u) -v $(pwd):/workdir -w /workdir/app -e NPM_CONFIG_CACHE=/tmp node:14.0-slim npm install
-    docker run -u $(id -u) -v $(pwd):/workdir -w /workdir/app -e NPM_CONFIG_CACHE=/tmp node:14.0-slim npm run build
+# ============================================================================
+# Build
+# ============================================================================
+
+# Build frontend JavaScript
+build-frontend:
+    @just _node "npm run build"
 
 # Build docker image for current architecture
-docker: appjs
+build: build-frontend
     docker build --build-arg "VERSION={{version}}" -t "{{image}}:{{tag}}" .
-    @echo "Docker image {{image}}:{{tag}} can now be used."
+    @echo "Built {{image}}:{{tag}}"
 
-# Build multiarch docker image (amd64 + arm64 by default)
-docker-multiarch: appjs
-    docker buildx create --name multiarch-builder --use --bootstrap 2>/dev/null || docker buildx use multiarch-builder
+# Build multiarch image and push to registry
+build-multiarch: build-frontend _ensure-buildx
     docker buildx build \
+        --builder {{container_prefix}}-builder \
         --build-arg "VERSION={{version}}" \
         --platform "{{platforms}}" \
         -t "{{image}}:{{tag}}" \
         --push .
-    @echo "Multiarch image {{image}}:{{tag}} pushed for platforms: {{platforms}}"
+    @echo "Pushed {{image}}:{{tag}} for platforms: {{platforms}}"
 
-# Build and load multiarch image locally (single platform only)
-docker-multiarch-local platform="linux/arm64": appjs
-    docker buildx create --name multiarch-builder --use --bootstrap 2>/dev/null || docker buildx use multiarch-builder
+# Build multiarch image and load locally (single platform)
+build-local platform="linux/arm64": build-frontend _ensure-buildx
     docker buildx build \
+        --builder {{container_prefix}}-builder \
         --build-arg "VERSION={{version}}" \
         --platform "{{platform}}" \
         -t "{{image}}:{{tag}}" \
         --load .
-    @echo "Docker image {{image}}:{{tag}} loaded for {{platform}}"
+    @echo "Loaded {{image}}:{{tag}} for {{platform}}"
 
-# Push docker image to registry
-push: docker
-    docker push "{{image}}:{{tag}}"
-    docker tag "{{image}}:{{tag}}" "{{image}}:latest"
-    docker push "{{image}}:latest"
+# ============================================================================
+# Run
+# ============================================================================
 
 # Run with mock data
-mock:
-    docker run -it --rm -p 8080:8080 "{{image}}:{{tag}}" --mock \
+run-mock: build
+    docker run -it --rm \
+        --name {{container_prefix}}-mock \
+        -p 8080:8080 \
+        "{{image}}:{{tag}}" --mock \
         --node-link-url-template "https://kube-web-view.example.org/clusters/{cluster}/nodes/{name}" \
         --pod-link-url-template "https://kube-web-view.example.org/clusters/{cluster}/namespaces/{namespace}/pods/{name}"
 
-# Remove buildx builder
+# Run with mock data (detached)
+run-mock-detached: build
+    docker run -d --rm \
+        --name {{container_prefix}}-mock \
+        -p 8080:8080 \
+        "{{image}}:{{tag}}" --mock
+    @echo "Running at http://localhost:8080 (container: {{container_prefix}}-mock)"
+
+# Run with kubeconfig
+run-kube config="~/.kube/config": build
+    docker run -it --rm \
+        --name {{container_prefix}}-kube \
+        -p 8080:8080 \
+        -v "{{config}}:/root/.kube/config:ro" \
+        "{{image}}:{{tag}}" --kubeconfig-path /root/.kube/config
+
+# View logs of running container
+logs name="mock":
+    docker logs -f {{container_prefix}}-{{name}}
+
+# Stop running container
+stop name="mock":
+    docker stop {{container_prefix}}-{{name}} 2>/dev/null || true
+
+# ============================================================================
+# Security Scanning
+# ============================================================================
+
+# Scan built image for vulnerabilities
+scan: build
+    docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v {{justfile_directory()}}/.trivy-cache:/root/.cache/ \
+        aquasec/trivy:latest image \
+        --severity HIGH,CRITICAL \
+        "{{image}}:{{tag}}"
+
+# Scan with full vulnerability report (all severities)
+scan-full: build
+    docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v {{justfile_directory()}}/.trivy-cache:/root/.cache/ \
+        aquasec/trivy:latest image \
+        "{{image}}:{{tag}}"
+
+# Scan and output JSON report
+scan-json: build
+    docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v {{justfile_directory()}}/.trivy-cache:/root/.cache/ \
+        aquasec/trivy:latest image \
+        --format json \
+        --output /dev/stdout \
+        "{{image}}:{{tag}}" > trivy-report.json
+    @echo "Report saved to trivy-report.json"
+
+# Scan and fail if HIGH/CRITICAL vulnerabilities found (for CI)
+scan-ci: build
+    docker run --rm \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v {{justfile_directory()}}/.trivy-cache:/root/.cache/ \
+        aquasec/trivy:latest image \
+        --exit-code 1 \
+        --severity HIGH,CRITICAL \
+        "{{image}}:{{tag}}"
+
+# ============================================================================
+# Push & Release
+# ============================================================================
+
+# Push image to registry
+push: build
+    docker push "{{image}}:{{tag}}"
+
+# Push with latest tag
+push-latest: push
+    docker tag "{{image}}:{{tag}}" "{{image}}:latest"
+    docker push "{{image}}:latest"
+
+# Update version in deployment manifests
+update-manifests:
+    find deploy -name '*.yaml' -exec sed -i '' "s|kube-ops-view:.*|kube-ops-view:{{version}}|g" {} \;
+    @echo "Updated deploy/*.yaml to version {{version}}"
+
+# ============================================================================
+# Cleanup
+# ============================================================================
+
+# Clean build artifacts
+clean:
+    rm -rf kube_ops_view/static/build
+    rm -rf app/node_modules/.cache
+
+# Clean all project containers (running and stopped)
+clean-containers:
+    @echo "Stopping and removing project containers..."
+    -docker ps -aq --filter "name={{container_prefix}}" | xargs -r docker rm -f
+    @echo "Done"
+
+# Clean orphan/exited containers system-wide
+clean-orphans:
+    @echo "Removing exited containers..."
+    -docker container prune -f
+    @echo "Done"
+
+# Clean dangling images
+clean-images:
+    @echo "Removing dangling images..."
+    -docker image prune -f
+    @echo "Done"
+
+# Clean buildx builder
 clean-builder:
-    docker buildx rm multiarch-builder 2>/dev/null || true
+    -docker buildx rm {{container_prefix}}-builder 2>/dev/null
+    @echo "Removed buildx builder"
+
+# Full cleanup (containers, images, builder, artifacts)
+clean-all: clean clean-containers clean-images clean-builder
+    @echo "Full cleanup complete"
+
+# ============================================================================
+# Internal Recipes
+# ============================================================================
+
+# Run command in node container (auto-cleanup)
+[private]
+_node *args:
+    docker run --rm \
+        --name {{container_prefix}}-node-$$ \
+        -u "$(id -u):$(id -g)" \
+        -v "$(pwd):/workdir" \
+        -w /workdir/app \
+        -e NPM_CONFIG_CACHE=/tmp/.npm \
+        -e HOME=/tmp \
+        {{node_image}} {{args}}
+
+# Ensure buildx builder exists
+[private]
+_ensure-buildx:
+    @docker buildx inspect {{container_prefix}}-builder >/dev/null 2>&1 || \
+        docker buildx create --name {{container_prefix}}-builder --bootstrap

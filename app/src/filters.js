@@ -1,4 +1,4 @@
-const PIXI = require('pixi.js')
+import * as PIXI from 'pixi.js'
 const BRIGHTNESS_FILTER = new PIXI.filters.ColorMatrixFilter()
 BRIGHTNESS_FILTER.brightness(1.3)
 

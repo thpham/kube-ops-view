@@ -2,7 +2,7 @@ import { Pod } from './pod.js'
 import Bars from './bars.js'
 import { parseResource } from './utils.js'
 import App from './app'
-const PIXI = require('pixi.js')
+import * as PIXI from 'pixi.js'
 
 
 export const isMaster = (labels) => {

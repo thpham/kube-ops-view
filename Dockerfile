@@ -1,33 +1,48 @@
-FROM python:3.11-slim
+# Build stage - install dependencies
+FROM registry.access.redhat.com/ubi9/python-312:latest AS builder
 
-WORKDIR /
+WORKDIR /opt/app-root/src
 
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install --yes --no-install-recommends curl gcc libc-dev libffi-dev && rm -rf /var/lib/apt/lists/*
+USER 0
 
-RUN pip3 install --no-cache-dir poetry==1.8.5
-# https://github.com/rust-lang/cargo/issues/8719#issuecomment-1253575253
-#ENV PATH=/root/.cargo/bin:$PATH
-#RUN --mount=type=tmpfs,target=/root/.cargo curl https://sh.rustup.rs -sSf | bash -s -- -y && pip install poetry
+# Install build dependencies
+RUN dnf install -y --nodocs gcc libffi-devel && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
 
-COPY poetry.lock /
-COPY pyproject.toml /
+RUN pip3 install --no-cache-dir "poetry>=2.0" poetry-plugin-export
 
-RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --only main --no-ansi --no-root
+COPY poetry.lock pyproject.toml ./
 
-FROM python:3.11-slim
+# Export requirements and install with pip (poetry 2.x has issues with virtualenvs.create=false in UBI)
+RUN poetry export -f requirements.txt --only main -o requirements.txt && \
+    pip3 install --no-cache-dir -r requirements.txt && \
+    # Remove build tools not needed at runtime (reduces CVEs)
+    pip3 uninstall -y pip setuptools wheel poetry poetry-core poetry-plugin-export 2>/dev/null || true && \
+    rm -rf /opt/app-root/lib*/python3.12/site-packages/pip* \
+           /opt/app-root/lib*/python3.12/site-packages/setuptools* \
+           /opt/app-root/lib*/python3.12/site-packages/wheel* \
+           /opt/app-root/lib*/python3.12/site-packages/poetry* \
+           /opt/app-root/lib*/python3.12/site-packages/_distutils_hack
 
-WORKDIR /
+# Runtime stage - UBI10 minimal image (fewer CVEs)
+FROM registry.access.redhat.com/ubi10/python-312-minimal:latest
 
-# copy pre-built packages to this image
-COPY --from=0 /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+WORKDIR /opt/app-root/src
 
-# now copy the actual code we will execute (poetry install above was just for dependencies)
-COPY kube_ops_view /kube_ops_view
+# Copy pre-built packages from builder
+COPY --from=builder /opt/app-root/lib64/python3.12/site-packages /opt/app-root/lib64/python3.12/site-packages
+COPY --from=builder /opt/app-root/lib/python3.12/site-packages /opt/app-root/lib/python3.12/site-packages
+
+# Copy application code (as root to allow sed modification)
+USER 0
+COPY kube_ops_view ./kube_ops_view
 
 ARG VERSION=dev
 
-RUN sed -i "s/__version__ = .*/__version__ = '${VERSION}'/" /kube_ops_view/__init__.py
+RUN sed -i "s/__version__ = .*/__version__ = '${VERSION}'/" ./kube_ops_view/__init__.py && \
+    chown -R 1001:0 ./kube_ops_view
+
+USER 1001
 
 ENTRYPOINT ["python3", "-m", "kube_ops_view"]

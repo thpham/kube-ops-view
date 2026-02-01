@@ -1,7 +1,7 @@
 import { Node, getNodePoolType, getPoolColor, getNodeAZ, POOL_PRIORITY } from './node.js'
 import { Pod } from './pod.js'
 import App from './app.js'
-const PIXI = require('pixi.js')
+import * as PIXI from 'pixi.js'
 
 export default class Cluster extends PIXI.Graphics {
   constructor(cluster, status, tooltip, config) {
@@ -14,13 +14,13 @@ export default class Cluster extends PIXI.Graphics {
 
   destroy() {
     if (this.tick) {
-      PIXI.ticker.shared.remove(this.tick, this)
+      PIXI.Ticker.shared.remove(this.tick, this)
     }
     super.destroy()
   }
 
   pulsate(_time) {
-    const v = Math.sin((PIXI.ticker.shared.lastTime % 1000) / 1000. * Math.PI)
+    const v = Math.sin((PIXI.Ticker.shared.lastTime % 1000) / 1000. * Math.PI)
     this.alpha = 0.4 + (v * 0.6)
   }
 
@@ -302,9 +302,9 @@ export default class Cluster extends PIXI.Graphics {
 
     if (newTick && newTick != this.tick) {
       this.tick = newTick
-      PIXI.ticker.shared.add(this.tick, this)
+      PIXI.Ticker.shared.add(this.tick, this)
     } else if (!newTick && this.tick) {
-      PIXI.ticker.shared.remove(this.tick, this)
+      PIXI.Ticker.shared.remove(this.tick, this)
       this.tick = null
       this.alpha = 1
       this.tint = 0xffffff
