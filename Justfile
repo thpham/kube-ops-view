@@ -52,17 +52,18 @@ watch:
 # Build
 # ============================================================================
 
-# Build frontend JavaScript
+# Build frontend JavaScript (for local development without Docker)
 build-frontend:
     @just _node "npm run build"
 
 # Build docker image for current architecture
-build: build-frontend
+# Note: Dockerfile includes JS build stage, no need for build-frontend dependency
+build:
     docker build --build-arg "VERSION={{version}}" -t "{{image}}:{{tag}}" .
     @echo "Built {{image}}:{{tag}}"
 
 # Build multiarch image and push to registry
-build-multiarch: build-frontend _ensure-buildx
+build-multiarch: _ensure-buildx
     docker buildx build \
         --builder {{container_prefix}}-builder \
         --build-arg "VERSION={{version}}" \
@@ -72,7 +73,7 @@ build-multiarch: build-frontend _ensure-buildx
     @echo "Pushed {{image}}:{{tag}} for platforms: {{platforms}}"
 
 # Build multiarch image and load locally (single platform)
-build-local platform="linux/arm64": build-frontend _ensure-buildx
+build-local platform="linux/arm64": _ensure-buildx
     docker buildx build \
         --builder {{container_prefix}}-builder \
         --build-arg "VERSION={{version}}" \
