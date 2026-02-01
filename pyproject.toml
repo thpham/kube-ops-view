@@ -1,24 +1,44 @@
-[tool]
-[tool.poetry]
+[project]
 name = "kube-ops-view"
-version = "2020.0.dev1"
+version = "2026.0.dev1"
 description = "Kubernetes Operational View - read-only system dashboard for multiple K8s clusters"
-authors = ["Henning Jacobs <henning@jacobs1.de>"]
+authors = [
+    {name = "Henning Jacobs", email = "henning@jacobs1.de"},
+    {name = "Thomas Pham", email = "thomas.pham@ithings.ch"}
+]
+requires-python = ">=3.12,<4"
+dynamic = ["dependencies"]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<4"
-click = "*"
-flask = "*"
-flask-dance = "*"
-gevent = "*"
+python = ">=3.12,<4"
+click = ">=8.1"
+flask = ">=3.0"
+flask-dance = ">=7.0"
+gevent = ">=24.0"
 json-delta = ">=2.0"
-pykube-ng = "*"
-redlock-py = "*"
-requests = "*"
-# for Python 3.10 support
-urllib3 = ">=1.26"
+pykube-ng = ">=23.0"
+pyyaml = ">=6.0.1"
+redlock-py = ">=1.0.8"
+requests = ">=2.32"
+# Security: CVE-2025-66418 fixed in urllib3 2.6.0+
+urllib3 = ">=2.6"
+# Security: Ensure up-to-date CA certificates
+certifi = ">=2024.0"
 stups-tokens = ">=1.1.19"
+# Security: CVE-2024-49767, CVE-2024-34069 fixed in werkzeug 3.0.6+
+werkzeug = ">=3.0.6"
+# Security: transitive dependency fixes
+filelock = ">=3.20.3"
+idna = ">=3.7"  # CVE-2024-3651
+jinja2 = ">=3.1.6"
+setuptools = ">=78.1.1"  # CVE-2024-6345, CVE-2025-47273
+zope-interface = ">=7.0"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest-cov = "*"
-pre-commit = "^2.9.2"
+pre-commit = ">=4.0"
+virtualenv = ">=20.36.1"  # CVE-2024-53899, CVE-2026-22702
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

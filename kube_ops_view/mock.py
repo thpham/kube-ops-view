@@ -91,19 +91,43 @@ def query_mock_cluster(cluster):
     """Generate deterministic (no randomness!) mock data."""
     index = int(cluster.id.split("-")[-1])
     nodes = {}
+
+    # Define availability zones for realistic distribution
+    availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
     for i in range(10):
         # add/remove the second to last node every 13 seconds
         if i == 8 and int(time.time() / 13) % 2 == 0:
             continue
         labels = {}
-        # only the first two clusters have master nodes
-        if i < 2 and index < 2:
+
+        # Assign AZ based on node index (distribute across zones)
+        az = availability_zones[i % len(availability_zones)]
+        labels["topology.kubernetes.io/zone"] = az
+
+        # Assign node roles based on index for realistic pool distribution
+        # Nodes 0-2: master/control-plane nodes
+        # Nodes 3-4: infra nodes (some with worker role too for multi-role demo)
+        # Nodes 5-9: worker nodes
+        if i < 3:
+            # Master nodes
             if index == 0:
-                labels["kubernetes.io/role"] = "master"
-            elif index == 1:
                 labels["node-role.kubernetes.io/master"] = ""
+                labels["node-role.kubernetes.io/control-plane"] = ""
+            elif index == 1:
+                labels["node-role.kubernetes.io/control-plane"] = ""
             else:
-                labels["master"] = "true"
+                labels["kubernetes.io/role"] = "master"
+        elif i < 5:
+            # Infra nodes
+            labels["node-role.kubernetes.io/infra"] = ""
+            # Node 3 has both infra and worker roles (multi-role demo)
+            if i == 3:
+                labels["node-role.kubernetes.io/worker"] = ""
+        else:
+            # Worker nodes
+            labels["node-role.kubernetes.io/worker"] = ""
+
         pods = {}
         for j in range(hash_int((index + 1) * (i + 1)) % 32):
             # add/remove some pods every 7 seconds

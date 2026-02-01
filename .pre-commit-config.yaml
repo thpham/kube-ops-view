@@ -8,38 +8,32 @@ repos:
       - id: check-hooks-apply
       - id: check-useless-excludes
 
-  - repo: https://codeberg.org/hjacobs/kube-manifest-lint
-    rev: 0.2.0
-    hooks:
-      - id: kube-manifest-lint
-        exclude: kustomization.yaml
-
   # formatters
 
   - repo: https://github.com/asottile/reorder_python_imports
-    rev: v3.9.0
+    rev: v3.16.0
     hooks:
       - id: reorder-python-imports
 
   - repo: https://github.com/ambv/black
-    rev: 23.3.0
+    rev: 26.1.0
     hooks:
       - id: black
 
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.4.0
+    rev: v3.21.2
     hooks:
       - id: pyupgrade
-        stages: [push]
+        stages: [pre-push]
 
   # linters
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
+    rev: 1.9.3
     hooks:
       - id: bandit
         args: ["-x", "tests"]
-        stages: [push]
+        stages: [pre-push]
 
   - repo: https://github.com/PyCQA/pydocstyle
     rev: 6.3.0
@@ -49,14 +43,13 @@ repos:
 
   - repo: local
     hooks:
-
       - id: safety
         name: safety
         entry: safety
         language: system
         pass_filenames: false
-        args: ["check", "--bare"]
-        stages: [push]
+        args: ["scan", "--bare"]
+        stages: [pre-push]
 
       - id: poetry
         name: poetry
@@ -65,22 +58,23 @@ repos:
         language: system
         pass_filenames: false
         files: ^pyproject.toml$
-        stages: [push]
+        stages: [pre-push]
 
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.31.0
+    rev: v1.38.0
     hooks:
       - id: yamllint
         args: ["--strict", "-d", "{rules: {line-length: {max: 180}}}"]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.2.0
+    rev: v1.19.1
     hooks:
       - id: mypy
-        additional_dependencies: ["types-requests", "types-PyYAML", "types-redis"]
+        additional_dependencies:
+          ["types-requests", "types-PyYAML", "types-redis"]
 
   - repo: https://github.com/pycqa/flake8
-    rev: 6.0.0
+    rev: 7.3.0
     hooks:
       - id: flake8
 
@@ -88,12 +82,12 @@ repos:
     rev: v0.1.0
     hooks:
       - id: dockerfilelint
-        stages: [commit]  # required
+        stages: [pre-commit] # required
 
   # miscellaneous
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
       - id: check-docstring-first
@@ -121,6 +115,6 @@ repos:
   # http://jorisroovers.com/gitlint/#using-gitlint-through-pre-commit
 
   - repo: https://github.com/jorisroovers/gitlint
-    rev:  v0.19.1
+    rev: v0.19.1
     hooks:
       - id: gitlint

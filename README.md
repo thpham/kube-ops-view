@@ -1,246 +1,166 @@
-Kubernetes Operational View
-===========================
+# Kubernetes Operational View
 
-[![Travis CI Build Status](https://travis-ci.org/hjacobs/kube-ops-view.svg?branch=master)](https://travis-ci.org/hjacobs/kube-ops-view)
-[![Documentation Status](https://readthedocs.org/projects/kubernetes-operational-view/badge/?version=latest)](http://kubernetes-operational-view.readthedocs.io/en/latest/?badge=latest)
-[![Docker pulls](https://img.shields.io/docker/pulls/hjacobs/kube-ops-view.svg)](https://hub.docker.com/r/hjacobs/kube-ops-view)
-[![Calendar Versioning](https://img.shields.io/badge/calver-YY.MM.MICRO-22bfda.svg)](http://calver.org)
+[![Build and Push Docker Image](https://github.com/thpham/kube-ops-view/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/thpham/kube-ops-view/actions/workflows/docker-publish.yml)
+
+> This is a maintained fork of [hjacobs/kube-ops-view](https://codeberg.org/hjacobs/kube-ops-view) with modernized dependencies and additional features.
 
 ![Screenshot](screenshot.png)
 
-Goal: provide a common operational picture for multiple Kubernetes
-clusters.
+Goal: provide a common operational picture for multiple Kubernetes clusters.
 
--   Render nodes and indicate their overall status (\"Ready\")
--   Show node capacity and resource usage (CPU, memory)
-    -   Render one \"box\" per CPU and fill up to sum of pod CPU
-        requests/usage
-    -   Render vertical bar for total memory and fill up to sum of pod
-        memory requests/usage
--   Render individual pods
-    -   Indicate pod status by border line color (green: ready/running,
-        yellow: pending, red: error etc)
-    -   Show current CPU/memory usage (gathered from Heapster) by small
-        vertical bars
-    -   System pods (\"kube-system\" namespace) will be grouped together
-        at the bottom
--   Provide tooltip information for nodes and pods
--   Animate pod creation and termination
+## Features
 
-What it is not:
+- Render nodes and indicate their overall status ("Ready")
+- Show node capacity and resource usage (CPU, memory)
+  - Render one "box" per CPU and fill up to sum of pod CPU requests/usage
+  - Render vertical bar for total memory and fill up to sum of pod memory requests/usage
+- **Node pool grouping with availability zone columns and color-coded visualization**
+- Render individual pods
+  - Indicate pod status by border line color (green: ready/running, yellow: pending, red: error etc)
+  - Show current CPU/memory usage by small vertical bars
+  - System pods ("kube-system" namespace) will be grouped together at the bottom
+- Provide tooltip information for nodes and pods
+- Animate pod creation and termination
 
--   It\'s not a replacement for the [Kubernetes
-    Dashboard](https://github.com/kubernetes/dashboard). The Kubernetes
-    Dashboard is a general purpose UI which allows managing
-    applications.
--   It\'s not a monitoring solution. Use your preferred monitoring
-    system to alert on production issues.
--   It\'s not a operation management tool. Kubernetes Operational View
-    does not allow interacting with the actual cluster.
+### What's Different in This Fork
 
-Usage
------
+- **Modernized stack**: Python 3.12, UBI10 minimal base image
+- **Node pool grouping**: Visual grouping by node pools with AZ column layout
+- **Security focused**: Regular dependency updates via Dependabot
+- **Multi-arch images**: AMD64 and ARM64 support
+- **OpenShift support**: Ready-to-use deployment manifests
+
+## What It Is Not
+
+- It's not a replacement for the [Kubernetes Dashboard](https://github.com/kubernetes/dashboard)
+- It's not a monitoring solution
+- It's not an operation management tool - it's read-only
+
+## Usage
 
 ### Running Locally
 
-You can run the app locally with `kubectl proxy` against your running
-cluster:
+You can run the app locally with `kubectl proxy` against your running cluster:
 
-``` {.sourceCode .bash}
-$ kubectl proxy &
-$ docker run -it --net=host hjacobs/kube-ops-view
+```bash
+kubectl proxy &
+docker run -it --net=host ghcr.io/thpham/kube-ops-view
 ```
 
-If you are using Docker for Mac, this needs to be slightly different in
-order to navigate the VM/container inception:
+If you are using Docker for Mac:
 
-``` {.sourceCode .bash}
-$ kubectl proxy --accept-hosts '.*' &
-$ docker run -it -p 8080:8080 -e CLUSTERS=http://docker.for.mac.localhost:8001 hjacobs/kube-ops-view
+```bash
+kubectl proxy --accept-hosts '.*' &
+docker run -it -p 8080:8080 -e CLUSTERS=http://docker.for.mac.localhost:8001 ghcr.io/thpham/kube-ops-view
 ```
 
-Now direct your browser to <http://localhost:8080>
+Now direct your browser to http://localhost:8080
 
-You can also try the UI with the integrated mock mode. This does not
-require any Kubernetes cluster access:
+You can also try the UI with the integrated mock mode (no cluster access required):
 
-``` {.sourceCode .bash}
-$ docker run -it -p 8080:8080 hjacobs/kube-ops-view --mock
+```bash
+docker run -it -p 8080:8080 ghcr.io/thpham/kube-ops-view --mock
 ```
 
 ### Installation
 
-You can find example Kubernetes manifests for deployment in the `deploy`
-folder. It should be as simple as:
+#### Kubernetes
 
-``` {.sourceCode .bash}
-$ kubectl apply -k deploy  # apply all manifests from the folder
+```bash
+kubectl apply -k deploy  # apply all manifests from the folder
+kubectl port-forward service/kube-ops-view 8080:80
 ```
 
-Afterwards you can open \"kube-ops-view\" via kubectl port-forward:
+Now direct your browser to http://localhost:8080/
 
-``` {.sourceCode .bash}
-$ kubectl port-forward service/kube-ops-view 8080:80
+#### OpenShift
+
+See the [openshift/](openshift/) folder for deployment options:
+
+- `openshift/deploy/` - Basic deployment with Route
+- `openshift/deploy-with-oauth-proxy/` - Deployment with OAuth proxy for authentication
+
+```bash
+kubectl apply -k openshift/deploy
 ```
 
-Now direct your browser to <http://localhost:8080/>
+## Development
 
-[Kubernetes Operational View is also available as a Helm
-Chart](https://kubeapps.com/charts/stable/kube-ops-view).
+The app can be started in "mock mode" to work on UI features without running any Kubernetes cluster:
 
-Development
------------
-
-The app can be started in \"mock mode\" to work on UI features without
-running any Kubernetes cluster:
-
-``` {.sourceCode .bash}
-$ pipenv install && pipenv shell
-$ (cd app && npm start &)  # watch and compile JS bundle
-$ python3 -m kube_ops_view --mock --debug
+```bash
+poetry install
+cd app && npm install && npm start &  # watch and compile JS bundle
+poetry run python -m kube_ops_view --mock --debug
 ```
 
-Building
---------
+## Building
 
-The provided `Makefile` will generate a Docker image by default:
+Build the Docker image using the provided `Justfile`:
 
-``` {.sourceCode .bash}
-$ make
+```bash
+just
 ```
 
-Multiple Clusters
------------------
+Or build directly with Docker:
 
-Multiple clusters are supported by passing a list of API servers,
-reading a kubeconfig file or pointing to an HTTP Cluster Registry
-endpoint.
+```bash
+docker build -t kube-ops-view .
+```
 
-See the [documentation on multiple
-clusters](https://kubernetes-operational-view.readthedocs.io/en/latest/multiple-clusters.html)
-for details.
+## Multiple Clusters
 
-Configuration
--------------
+Multiple clusters are supported by passing a list of API servers, reading a kubeconfig file, or pointing to an HTTP Cluster Registry endpoint.
+
+See the [documentation on multiple clusters](https://kubernetes-operational-view.readthedocs.io/en/latest/multiple-clusters.html) for details.
+
+## Configuration
 
 The following environment variables are supported:
 
-`AUTHORIZE_URL`
+| Variable                 | Description                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `CLUSTERS`               | Comma separated list of Kubernetes API server URLs. Defaults to `http://localhost:8001/`           |
+| `KUBECONFIG_PATH`        | Path to kubeconfig file to use for cluster access                                                  |
+| `KUBECONFIG_CONTEXTS`    | Comma separated list of contexts to use from kubeconfig                                            |
+| `CLUSTER_REGISTRY_URL`   | URL to cluster registry returning list of Kubernetes clusters                                      |
+| `QUERY_INTERVAL`         | Interval in seconds for querying clusters (default: 5)                                             |
+| `REDIS_URL`              | Optional Redis server for pub/sub when running multiple replicas. Example: `redis://my-redis:6379` |
+| `SERVER_PORT`            | HTTP port to listen on (default: `8080`)                                                           |
+| `DEBUG`                  | Set to "true" for local development to reload code changes                                         |
+| `MOCK`                   | Set to "true" to mock Kubernetes cluster data                                                      |
+| `ROUTE_PREFIX`           | URL prefix for reverse proxy setups                                                                |
+| `NODE_LINK_URL_TEMPLATE` | Template to make Nodes clickable. Variables: `{cluster}`, `{name}`                                 |
+| `POD_LINK_URL_TEMPLATE`  | Template to make Pods clickable. Variables: `{cluster}`, `{namespace}`, `{name}`                   |
 
-:   Optional OAuth 2 authorization endpoint URL for protecting the UI.
+### OAuth Configuration
 
-`ACCESS_TOKEN_URL`
+| Variable           | Description                                             |
+| ------------------ | ------------------------------------------------------- |
+| `AUTHORIZE_URL`    | OAuth 2 authorization endpoint URL                      |
+| `ACCESS_TOKEN_URL` | Token endpoint URL for OAuth 2 Authorization Code Grant |
+| `SCOPE`            | OAuth scope for access level                            |
+| `CREDENTIALS_DIR`  | Directory to read OAuth credentials from                |
 
-:   Optional token endpoint URL for the OAuth 2 Authorization Code Grant
-    flow.
+## Supported Browsers
 
-`SCOPE`
+The UI uses WebGL, ECMAScript 6, and EventSource features:
 
-:   Optional scope specifies level of access that the application is
-    requesting.
+- Chrome/Chromium 53.0+
+- Mozilla Firefox 49.0+
 
-`CLUSTERS`
+## Contributing
 
-:   Comma separated list of Kubernetes API server URLs. It defaults to
-    `http://localhost:8001/` (default endpoint of `kubectl proxy`).
+PRs are welcome! Please open an issue first to discuss significant changes.
 
-`CLUSTER_REGISTRY_URL`
+## Acknowledgments
 
-:   URL to cluster registry returning list of Kubernetes clusters.
+This project is a fork of [kube-ops-view](https://codeberg.org/hjacobs/kube-ops-view) originally created by [Henning Jacobs](https://codeberg.org/hjacobs).
 
-`CREDENTIALS_DIR`
+## License
 
-:   Directory to read (OAuth) credentials from \-\-- these credentials
-    are only used for non-localhost cluster URLs.
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
-`DEBUG`
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-:   Set to \"true\" for local development to reload code changes.
-
-`KUBECONFIG_PATH`
-
-:   Path to kubeconfig file to use for cluster access.
-
-`KUBECONFIG_CONTEXTS`
-
-:   Comma separated list of contexts to use when reading the kubeconfig
-    file from `KUBECONFIG_PATH`.
-
-`MOCK`
-
-:   Set to \"true\" to mock Kubernetes cluster data.
-
-`QUERY_INTERVAL`
-
-:   Interval in seconds for querying clusters (default: 5). Each cluster
-    will at most queried once per configured interval.
-
-`REDIS_URL`
-
-:   Optional Redis server to use for pub/sub events and job locking when
-    running more than one replica. Example: `redis://my-redis:6379`
-
-`SERVER_PORT`
-
-:   HTTP port to listen on. It defaults to `8080`.
-
-`NODE_LINK_URL_TEMPLATE`
-
-:   Template to make Nodes clickable, e.g. can point to
-    [kube-web-view](https://codeberg.org/hjacobs/kube-web-view/).
-    `{cluster}` (cluster ID) and `{name}` (Node name) will be replaced
-    in the URL template.
-
-`POD_LINK_URL_TEMPLATE`
-
-:   Template to make Pods clickable, e.g. can point to
-    [kube-web-view](https://codeberg.org/hjacobs/kube-web-view/).
-    `{cluster}` (cluster ID), `{namespace}` (Pod\'s namespace), and
-    `{name}` (Pod name) will be replaced in the URL template.
-
-`ROUTE_PREFIX`
-
-:   The URL prefix under which kube-ops-view is externally reachable
-    (for example, if kube-ops-view is served via a reverse proxy). Used
-    for generating relative and absolute links back to kube-ops-view
-    itself. If the URL has a path portion, it will be used to prefix all
-    HTTP endpoints served by kube-ops-view. If omitted, relevant URL
-    components will be derived automatically.
-
-Supported Browsers
-------------------
-
-The UI uses WebGL, ECMAScript 6, and EventSource features. The following
-browsers are known to work:
-
--   Chrome/Chromium 53.0+
--   Mozilla Firefox 49.0+
-
-See the [ECMAScript 6 Compatibility
-Table](https://kangax.github.io/compat-table/es6/) for details on
-supported browser versions.
-
-Contributing
-------------
-
-Easiest way to contribute is to provide feedback! We would love to hear
-what you like and what you think is missing. Create an issue or [ping
-try\_except\_ on Twitter](https://twitter.com/try_except_).
-
-PRs are welcome.
-
-License
--------
-
-This program is free software: you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the
-Free Software Foundation, either version 3 of the License, or (at your
-option) any later version.
-
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-Public License for more details.
-
-You should have received a copy of the GNU General Public License along
-with this program. If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU General Public License along with this program. If not, see <http://www.gnu.org/licenses/>.

@@ -15,3 +15,5 @@ scm-source.json
 .pytest_cache/
 .mypy_cache
 .python-version
+.trivy-cache/
+trivy-report.json
