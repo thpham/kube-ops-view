@@ -84,6 +84,7 @@ export class Pod extends PIXI.Graphics {
 
   constructor(pod, cluster, tooltip) {
     super()
+    this.allowChildren = true
     this.pod = pod
     this.cluster = cluster
     this.tooltip = tooltip
@@ -104,7 +105,8 @@ export class Pod extends PIXI.Graphics {
     super.destroy()
   }
 
-  animateMove(time) {
+  animateMove(ticker) {
+    const time = ticker.deltaTime
     const deltaX = this._targetPosition.x - this.position.x
     const deltaY = this._targetPosition.y - this.position.y
     if (Math.abs(deltaX) < 2 && Math.abs(deltaY) < 2) {
@@ -176,7 +178,7 @@ export class Pod extends PIXI.Graphics {
 
   crashing(_time) {
     const v = Math.sin((PIXI.Ticker.shared.lastTime % 1000) / 1000. * Math.PI)
-    this.tint = PIXI.utils.rgb2hex([1, v, v])
+    this.tint = new PIXI.Color([1, v, v]).toNumber()
   }
 
   terminating(_time) {
@@ -251,15 +253,16 @@ export class Pod extends PIXI.Graphics {
       this.tooltip.visible = false
     })
     if (App.current.config.podLinkUrlTemplate !== null) {
-      podBox.buttonMode = true
+      podBox.cursor = 'pointer'
       podBox.on('click', function () {
         location.href = App.current.config.podLinkUrlTemplate.replace('{cluster}', this.cluster.cluster.id).replace('{namespace}', this.pod.namespace).replace('{name}', this.pod.name)
       })
     }
-    podBox.lineStyle(1, App.current.theme.primaryColor, 1)
+    // Draw container cells
     const w = 10 / this.pod.containers.length
     for (let i = 0; i < this.pod.containers.length; i++) {
-      podBox.drawRect(i * w, 0, w, 10)
+      podBox.rect(i * w, 0, w, 10)
+      podBox.stroke({ width: 1, color: App.current.theme.primaryColor })
     }
     let color
     if (this.pod.phase == 'Succeeded') {
@@ -279,22 +282,22 @@ export class Pod extends PIXI.Graphics {
       newTick = this.crashing
       color = 0xffaaaa
     }
-    podBox.lineStyle(2, color, 1)
-    podBox.beginFill(color, 0.2)
-    podBox.drawRect(0, 0, 10, 10)
+    podBox.rect(0, 0, 10, 10)
+    podBox.fill({ color: color, alpha: 0.2 })
+    podBox.stroke({ width: 2, color: color })
     if (this.pod.deleted) {
       if (!this.cross) {
         const cross = new PIXI.Graphics()
-        cross.lineStyle(3, 0xff0000, 1)
         cross.moveTo(0, 0)
         cross.lineTo(10, 10)
         cross.moveTo(10, 0)
         cross.lineTo(0, 10)
+        cross.stroke({ width: 3, color: 0xff0000 })
         cross.pivot.x = 5
         cross.pivot.y = 5
         cross.x = 5
         cross.y = 5
-        cross.blendMode = PIXI.BLEND_MODES.ADD
+        cross.blendMode = 'add'
         this.addChild(cross)
         this.cross = cross
       }
@@ -302,11 +305,11 @@ export class Pod extends PIXI.Graphics {
     }
 
     if (restarts) {
-      this.lineStyle(2, 0xff9999, 1)
       for (let i = 0; i < Math.min(restarts, 4); i++) {
         this.moveTo(10, i * 3 - 1)
         this.lineTo(10, i * 3 + 1)
       }
+      this.stroke({ width: 2, color: 0xff9999 })
     }
 
     if (newTick && newTick != this.tick) {
@@ -325,23 +328,19 @@ export class Pod extends PIXI.Graphics {
     const scaleCpu = Math.max(resources.cpu.requested, resources.cpu.limit, resources.cpu.used) / 8
     const scaledCpuReq = resources.cpu.requested !== 0 && scaleCpu !== 0 ? resources.cpu.requested / scaleCpu : 0
     const scaledCpuUsed = resources.cpu.used !== 0 && scaleCpu !== 0 ? resources.cpu.used / scaleCpu : 0
-    podBox.lineStyle()
-    podBox.beginFill(getBarColor(resources.cpu.requested, resources.cpu.limit), 1)
-    podBox.drawRect(1, 9 - scaledCpuReq, 1, scaledCpuReq)
-    podBox.beginFill(getBarColor(resources.cpu.used, resources.cpu.limit), 1)
-    podBox.drawRect(2, 9 - scaledCpuUsed, 1, scaledCpuUsed)
-    podBox.endFill()
+    podBox.rect(1, 9 - scaledCpuReq, 1, scaledCpuReq)
+    podBox.fill({ color: getBarColor(resources.cpu.requested, resources.cpu.limit) })
+    podBox.rect(2, 9 - scaledCpuUsed, 1, scaledCpuUsed)
+    podBox.fill({ color: getBarColor(resources.cpu.used, resources.cpu.limit) })
 
     // Memory
     const scale = Math.max(resources.memory.requested, resources.memory.limit, resources.memory.used) / 8
     const scaledMemReq = resources.memory.requested !== 0 && scale !== 0 ? resources.memory.requested / scale : 0
     const scaledMemUsed = resources.memory.used !== 0 && scale !== 0 ? resources.memory.used / scale : 0
-    podBox.lineStyle()
-    podBox.beginFill(getBarColor(resources.memory.requested, resources.memory.limit), 1)
-    podBox.drawRect(3, 9 - scaledMemReq, 1, scaledMemReq)
-    podBox.beginFill(getBarColor(resources.memory.used, resources.memory.limit), 1)
-    podBox.drawRect(4, 9 - scaledMemUsed, 1, scaledMemUsed)
-    podBox.endFill()
+    podBox.rect(3, 9 - scaledMemReq, 1, scaledMemReq)
+    podBox.fill({ color: getBarColor(resources.memory.requested, resources.memory.limit) })
+    podBox.rect(4, 9 - scaledMemUsed, 1, scaledMemUsed)
+    podBox.fill({ color: getBarColor(resources.memory.used, resources.memory.limit) })
 
     return this
   }

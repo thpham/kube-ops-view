@@ -11,7 +11,7 @@ dynamic = ["dependencies"]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4"
-click = ">=8.1"
+click = ">=8.3.1"
 flask = ">=3.0"
 flask-dance = ">=7.0"
 gevent = ">=24.0"
@@ -35,7 +35,7 @@ setuptools = ">=78.1.1"  # CVE-2024-6345, CVE-2025-47273
 zope-interface = ">=7.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest-cov = "*"
+pytest-cov = ">=7.0.0"
 pre-commit = ">=4.0"
 virtualenv = ">=20.36.1"  # CVE-2024-53899, CVE-2026-22702
 

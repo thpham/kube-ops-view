@@ -16,39 +16,50 @@ export default class Bars extends PIXI.Graphics {
     const barHeightPx = bars.entity.heightOfNodePx - (App.current.heightOfTopHandlePx + 5 + 3)
     const heightOfNodeWoPaddingPx = bars.entity.heightOfNodePx - 5
 
-    bars.beginFill(App.current.theme.primaryColor, 0.1)
-    bars.drawRect(5, heightOfNodeWoPaddingPx - barHeightPx, 15, barHeightPx)
-    bars.endFill()
+    // Background bar
+    bars.rect(5, heightOfNodeWoPaddingPx - barHeightPx, 15, barHeightPx)
+    bars.fill({ color: App.current.theme.primaryColor, alpha: 0.1 })
 
     // CPU
     const cpuHeight = barHeightPx / bars.resources.cpu.capacity
     bars.interactive = true
-    bars.lineStyle(0, 0xaaffaa, 1)
-    bars.beginFill(getBarColor(bars.resources.cpu.requested, bars.resources.cpu.capacity - bars.resources.cpu.reserved), 1)
-    bars.drawRect(5, heightOfNodeWoPaddingPx - (bars.resources.cpu.requested + bars.resources.cpu.reserved) * cpuHeight, 2.5, (bars.resources.cpu.requested + bars.resources.cpu.reserved) * cpuHeight)
-    bars.beginFill(getBarColor(bars.resources.cpu.used, bars.resources.cpu.capacity), 1)
-    bars.drawRect(7.5, heightOfNodeWoPaddingPx - bars.resources.cpu.used * cpuHeight, 2.5, bars.resources.cpu.used * cpuHeight)
-    bars.endFill()
-    bars.lineStyle(1, App.current.theme.primaryColor, 1)
-    bars.drawRect(5, heightOfNodeWoPaddingPx - bars.resources.cpu.reserved * cpuHeight, 5, bars.resources.cpu.reserved * cpuHeight)
+
+    // CPU requested bar
+    bars.rect(5, heightOfNodeWoPaddingPx - (bars.resources.cpu.requested + bars.resources.cpu.reserved) * cpuHeight, 2.5, (bars.resources.cpu.requested + bars.resources.cpu.reserved) * cpuHeight)
+    bars.fill({ color: getBarColor(bars.resources.cpu.requested, bars.resources.cpu.capacity - bars.resources.cpu.reserved) })
+
+    // CPU used bar
+    bars.rect(7.5, heightOfNodeWoPaddingPx - bars.resources.cpu.used * cpuHeight, 2.5, bars.resources.cpu.used * cpuHeight)
+    bars.fill({ color: getBarColor(bars.resources.cpu.used, bars.resources.cpu.capacity) })
+
+    // CPU reserved outline
+    bars.rect(5, heightOfNodeWoPaddingPx - bars.resources.cpu.reserved * cpuHeight, 5, bars.resources.cpu.reserved * cpuHeight)
+    bars.stroke({ width: 1, color: App.current.theme.primaryColor })
 
     // Memory
     const scale = bars.resources.memory.capacity / barHeightPx
-    bars.lineStyle(0, 0xaaffaa, 1)
-    bars.beginFill(getBarColor(bars.resources.memory.requested, bars.resources.memory.capacity - bars.resources.memory.reserved), 1)
-    bars.drawRect(14, heightOfNodeWoPaddingPx - (bars.resources.memory.requested + bars.resources.memory.reserved) / scale, 2.5, (bars.resources.memory.requested + bars.resources.memory.reserved) / scale)
-    bars.beginFill(getBarColor(bars.resources.memory.used, bars.resources.memory.capacity), 1)
-    bars.drawRect(16.5, heightOfNodeWoPaddingPx - bars.resources.memory.used / scale, 2.5, bars.resources.memory.used / scale)
-    bars.endFill()
-    bars.lineStyle(1, App.current.theme.primaryColor, 1)
-    bars.drawRect(14, heightOfNodeWoPaddingPx - bars.resources.memory.reserved / scale, 5, bars.resources.memory.reserved / scale)
 
-    bars.lineStyle(1, App.current.theme.primaryColor, 1)
+    // Memory requested bar
+    bars.rect(14, heightOfNodeWoPaddingPx - (bars.resources.memory.requested + bars.resources.memory.reserved) / scale, 2.5, (bars.resources.memory.requested + bars.resources.memory.reserved) / scale)
+    bars.fill({ color: getBarColor(bars.resources.memory.requested, bars.resources.memory.capacity - bars.resources.memory.reserved) })
+
+    // Memory used bar
+    bars.rect(16.5, heightOfNodeWoPaddingPx - bars.resources.memory.used / scale, 2.5, bars.resources.memory.used / scale)
+    bars.fill({ color: getBarColor(bars.resources.memory.used, bars.resources.memory.capacity) })
+
+    // Memory reserved outline
+    bars.rect(14, heightOfNodeWoPaddingPx - bars.resources.memory.reserved / scale, 5, bars.resources.memory.reserved / scale)
+    bars.stroke({ width: 1, color: App.current.theme.primaryColor })
+
+    // CPU capacity grid
     for (var i = 0; i < bars.resources.cpu.capacity; i++) {
-      bars.drawRect(5, heightOfNodeWoPaddingPx - (i + 1) * cpuHeight, 5, cpuHeight)
+      bars.rect(5, heightOfNodeWoPaddingPx - (i + 1) * cpuHeight, 5, cpuHeight)
+      bars.stroke({ width: 1, color: App.current.theme.primaryColor })
     }
 
-    bars.drawRect(14, heightOfNodeWoPaddingPx - bars.resources.memory.capacity / scale, 5, bars.resources.memory.capacity / scale)
+    // Memory capacity outline
+    bars.rect(14, heightOfNodeWoPaddingPx - bars.resources.memory.capacity / scale, 5, bars.resources.memory.capacity / scale)
+    bars.stroke({ width: 1, color: App.current.theme.primaryColor })
 
     bars.on('mouseover', function () {
       let s = 'CPU: \n'
