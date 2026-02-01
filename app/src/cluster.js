@@ -6,6 +6,7 @@ import * as PIXI from 'pixi.js'
 export default class Cluster extends PIXI.Graphics {
   constructor(cluster, status, tooltip, config) {
     super()
+    this.allowChildren = true
     this.cluster = cluster
     this.status = status
     this.tooltip = tooltip
@@ -142,15 +143,15 @@ export default class Cluster extends PIXI.Graphics {
 
       // Add pool header/label
       const poolHeader = new PIXI.Graphics()
-      poolHeader.beginFill(poolColor, 0.3)
-      poolHeader.lineStyle(1, poolColor, 0.8)
-      poolHeader.drawRect(0, 0, 200, poolHeaderHeight)  // Width will be adjusted later
-      poolHeader.endFill()
+      poolHeader.allowChildren = true
+      poolHeader.rect(0, 0, 200, poolHeaderHeight)  // Width will be adjusted later
+      poolHeader.fill({ color: poolColor, alpha: 0.3 })
+      poolHeader.stroke({ width: 1, color: poolColor, alpha: 0.8 })
 
-      const poolLabel = new PIXI.Text(
-        `${poolType.toUpperCase()} (${totalNodesInPool})`,
-        { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0xffffff }
-      )
+      const poolLabel = new PIXI.Text({
+        text: `${poolType.toUpperCase()} (${totalNodesInPool})`,
+        style: { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0xffffff }
+      })
       poolLabel.x = 4
       poolLabel.y = 2
       poolHeader.addChild(poolLabel)
@@ -184,19 +185,19 @@ export default class Cluster extends PIXI.Graphics {
         // Add AZ header if showing
         if (showAZHeaders) {
           const azHeader = new PIXI.Graphics()
-          azHeader.beginFill(poolColor, 0.15)
-          azHeader.lineStyle(1, poolColor, 0.4)
-          azHeader.drawRect(0, 0, azWidthPx, azHeaderHeight)
-          azHeader.endFill()
+          azHeader.allowChildren = true
+          azHeader.rect(0, 0, azWidthPx, azHeaderHeight)
+          azHeader.fill({ color: poolColor, alpha: 0.15 })
+          azHeader.stroke({ width: 1, color: poolColor, alpha: 0.4 })
 
           // Truncate AZ name if too long
           const maxAZChars = Math.floor(azWidthPx / 6)
           const displayAZ = az.length > maxAZChars ? az.substring(az.length - maxAZChars) : az
 
-          const azLabel = new PIXI.Text(
-            `${displayAZ} (${nodesInAZ.length})`,
-            { fontFamily: 'ShareTechMono', fontSize: 9, fill: 0xcccccc }
-          )
+          const azLabel = new PIXI.Text({
+            text: `${displayAZ} (${nodesInAZ.length})`,
+            style: { fontFamily: 'ShareTechMono', fontSize: 9, fill: 0xcccccc }
+          })
           azLabel.x = 3
           azLabel.y = 1
           azHeader.addChild(azLabel)
@@ -271,23 +272,23 @@ export default class Cluster extends PIXI.Graphics {
     }
 
     // Draw cluster border
-    this.lineStyle(2, App.current.theme.primaryColor, 1)
     const width = overallMaxX
     const height = currentY - padding
-    this.drawRect(0, 0, width, height)
+    this.rect(0, 0, width, height)
+    this.stroke({ width: 2, color: App.current.theme.primaryColor })
 
     // Draw cluster top handle
     const topHandle = this.topHandle = new PIXI.Graphics()
-    topHandle.beginFill(App.current.theme.primaryColor, 1)
-    topHandle.drawRect(0, 0, width, App.current.heightOfTopHandlePx)
-    topHandle.endFill()
+    topHandle.allowChildren = true
+    topHandle.rect(0, 0, width, App.current.heightOfTopHandlePx)
+    topHandle.fill({ color: App.current.theme.primaryColor })
     topHandle.interactive = true
-    topHandle.buttonMode = true
+    topHandle.cursor = 'pointer'
     const that = this
     topHandle.on('click', function (_event) {
       App.current.toggleCluster(that.cluster.id)
     })
-    const text = new PIXI.Text(''.concat(this.cluster.api_server_url, ' (', this.cluster.id, ')'), { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0x000000 })
+    const text = new PIXI.Text({ text: ''.concat(this.cluster.api_server_url, ' (', this.cluster.id, ')'), style: { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0x000000 } })
     text.x = 2
     text.y = 2
     topHandle.addChild(text)

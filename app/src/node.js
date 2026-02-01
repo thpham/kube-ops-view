@@ -168,6 +168,7 @@ export const getNodeAZ = (labels) => {
 export class Node extends PIXI.Graphics {
   constructor(node, cluster, tooltip, podsPerRow, widthOfNodePx, heightOfNodePx, poolColor = null) {
     super()
+    this.allowChildren = true
     this.node = node
     this.cluster = cluster
     this.tooltip = tooltip
@@ -219,11 +220,11 @@ export class Node extends PIXI.Graphics {
   draw() {
     const nodeBox = this
     const topHandle = new PIXI.Graphics()
+    topHandle.allowChildren = true
     // Use pool color if available, otherwise fall back to theme color
     const handleColor = this.poolColor || App.current.theme.primaryColor
-    topHandle.beginFill(handleColor, 1)
-    topHandle.drawRect(0, 0, this.widthOfNodePx, App.current.heightOfTopHandlePx)
-    topHandle.endFill()
+    topHandle.rect(0, 0, this.widthOfNodePx, App.current.heightOfTopHandlePx)
+    topHandle.fill({ color: handleColor })
 
     // Check for multiple roles
     const allRoles = getAllNodePoolTypes(this.node.labels)
@@ -235,7 +236,7 @@ export class Node extends PIXI.Graphics {
     const indicatorWidth = hasMultipleRoles ? 14 : 0
     const availableTextRoom = roomForText - (indicatorWidth > 0 ? 3 : 0)
     const ellipsizedNodeName = this.node.name.length > availableTextRoom ? this.node.name.substring(0, availableTextRoom).concat('…') : this.node.name
-    const text = new PIXI.Text(ellipsizedNodeName, { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0x000000 })
+    const text = new PIXI.Text({ text: ellipsizedNodeName, style: { fontFamily: 'ShareTechMono', fontSize: 10, fill: 0x000000 } })
     text.x = 2
     text.y = 2
     topHandle.addChild(text)
@@ -243,13 +244,13 @@ export class Node extends PIXI.Graphics {
     // Add multi-role indicator badge if node has multiple roles
     if (hasMultipleRoles) {
       const badge = new PIXI.Graphics()
+      badge.allowChildren = true
       // Use a contrasting color for the badge
-      badge.beginFill(0x333333, 0.8)
-      badge.drawRoundedRect(0, 0, 12, 10, 2)
-      badge.endFill()
+      badge.roundRect(0, 0, 12, 10, 2)
+      badge.fill({ color: 0x333333, alpha: 0.8 })
 
       // Show number of additional roles
-      const badgeText = new PIXI.Text(`+${allRoles.length - 1}`, { fontFamily: 'ShareTechMono', fontSize: 7, fill: 0xffffff })
+      const badgeText = new PIXI.Text({ text: `+${allRoles.length - 1}`, style: { fontFamily: 'ShareTechMono', fontSize: 7, fill: 0xffffff } })
       badgeText.x = 2
       badgeText.y = 1
       badge.addChild(badgeText)
@@ -260,11 +261,9 @@ export class Node extends PIXI.Graphics {
     }
     nodeBox.addChild(topHandle)
     // Use pool color for node border if available
-    nodeBox.lineStyle(2, handleColor, 1)
-    nodeBox.beginFill(App.current.theme.secondaryColor, 1)
-    nodeBox.drawRect(0, 0, this.widthOfNodePx, this.heightOfNodePx)
-    nodeBox.endFill()
-    nodeBox.lineStyle(2, 0xaaaaaa, 1)
+    nodeBox.rect(0, 0, this.widthOfNodePx, this.heightOfNodePx)
+    nodeBox.fill({ color: App.current.theme.secondaryColor })
+    nodeBox.stroke({ width: 2, color: handleColor })
     topHandle.interactive = true
     topHandle.on('mouseover', function () {
       let s = nodeBox.node.name
@@ -285,7 +284,7 @@ export class Node extends PIXI.Graphics {
       nodeBox.tooltip.visible = false
     })
     if (App.current.config.nodeLinkUrlTemplate !== null) {
-      topHandle.buttonMode = true
+      topHandle.cursor = 'pointer'
       topHandle.on('click', function () {
         location.href = App.current.config.nodeLinkUrlTemplate.replace('{cluster}', nodeBox.cluster.cluster.id).replace('{name}', nodeBox.node.name)
       })

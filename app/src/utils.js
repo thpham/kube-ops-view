@@ -58,7 +58,7 @@ function hsvToRgb(h, s, v) {
       b = q
       break
   }
-  return PIXI.utils.rgb2hex([r, g, b])
+  return new PIXI.Color([r, g, b]).toNumber()
 }
 
 function getBarColor(usage, capacity) {

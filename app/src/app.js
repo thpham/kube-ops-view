@@ -145,26 +145,26 @@ export default class App {
     })
   }
 
-  initialize() {
+  async initialize() {
     App.current = this
 
-    // create the renderer
+    // create the renderer (async in pixi.js 8.x)
     const noWebGL = this.config.renderer === 'canvas'
-    const renderer = PIXI.autoDetectRenderer({
+    const renderer = await PIXI.autoDetectRenderer({
       width: window.innerWidth,
       height: window.innerHeight,
       resolution: 2,
       autoDensity: true,
-      forceCanvas: noWebGL
+      preference: noWebGL ? 'webgl' : undefined
     })
-    renderer.view.style.display = 'block'
+    renderer.canvas.style.display = 'block'
 
     window.onresize = function () {
       renderer.resize(window.innerWidth, window.innerHeight)
     }
 
     //Add the canvas to the HTML document
-    document.body.appendChild(renderer.view)
+    document.body.appendChild(renderer.canvas)
     this.renderer = renderer
 
     //Create a container object called the `stage`
@@ -225,7 +225,7 @@ export default class App {
         prevX = event.clientX
         prevY = event.clientY
         isDragging = true
-        this.renderer.view.style.cursor = 'move'
+        this.renderer.canvas.style.cursor = 'move'
       }
     }
 
@@ -247,7 +247,7 @@ export default class App {
 
     function mouseUpHandler(_event) {
       isDragging = false
-      this.renderer.view.style.cursor = 'default'
+      this.renderer.canvas.style.cursor = 'default'
     }
 
     function touchStartHandler(event) {
@@ -307,7 +307,7 @@ export default class App {
 
       // zoom around one point on ViewContainer
       const beforeTransform = getLocalCoordinates(x, y)
-      that.viewContainer.updateTransform()
+      // In pixi.js 8.x, transforms update automatically - no need to call updateTransform
       const afterTransform = getLocalCoordinates(x, y)
 
       that.viewContainer.x += (afterTransform.x - beforeTransform.x) * newScale
@@ -318,26 +318,26 @@ export default class App {
       that.viewContainerTargetPosition.y = that.viewContainer.y
     }
 
-    addWheelListener(this.renderer.view, function (e) {
+    addWheelListener(this.renderer.canvas, function (e) {
       zoom(e.clientX, e.clientY, e.deltaY < 0)
     })
   }
 
   drawMenuBar() {
     const menuBar = new PIXI.Graphics()
-    menuBar.beginFill(this.theme.secondaryColor, 1)
-    menuBar.drawRect(0, 0, this.renderer.width, 28)
-    menuBar.lineStyle(2, this.theme.secondaryColor, 1)
+    menuBar.allowChildren = true
+    menuBar.rect(0, 0, this.renderer.width, 28)
+    menuBar.fill({ color: this.theme.secondaryColor })
     menuBar.moveTo(0, 28)
     menuBar.lineTo(this.renderer.width, 28)
-    menuBar.lineStyle(1, this.theme.primaryColor, 1)
-    menuBar.drawRect(20, 3, 200, 22)
+    menuBar.stroke({ width: 2, color: this.theme.secondaryColor })
+    menuBar.rect(20, 3, 200, 22)
+    menuBar.stroke({ width: 1, color: this.theme.primaryColor })
     this.stage.addChild(menuBar)
 
-    const searchPrompt = new PIXI.Text('>', {
-      fontFamily: 'ShareTechMono',
-      fontSize: 14,
-      fill: this.theme.primaryColor
+    const searchPrompt = new PIXI.Text({
+      text: '>',
+      style: { fontFamily: 'ShareTechMono', fontSize: 14, fill: this.theme.primaryColor }
     })
     searchPrompt.x = 26
     searchPrompt.y = 8
@@ -347,7 +347,7 @@ export default class App {
     })
     this.stage.addChild(searchPrompt)
 
-    const searchText = new PIXI.Text('', { fontFamily: 'ShareTechMono', fontSize: 14, fill: this.theme.primaryColor })
+    const searchText = new PIXI.Text({ text: '', style: { fontFamily: 'ShareTechMono', fontSize: 14, fill: this.theme.primaryColor } })
     searchText.x = 40
     searchText.y = 8
     this.stage.addChild(searchText)
@@ -408,7 +408,7 @@ export default class App {
   animatePodCreation(originalPod, globalPosition) {
     const pod = new Pod(originalPod.pod, null, this.tooltip)
     pod.draw()
-    pod.blendMode = PIXI.BLEND_MODES.ADD
+    pod.blendMode = 'add'
     pod.interactive = false
     const targetPosition = globalPosition
     const angle = Math.random() * Math.PI * 2
@@ -416,7 +416,7 @@ export default class App {
     const sin = Math.sin(angle)
     const distance = Math.max(200, Math.random() * Math.min(this.renderer.width, this.renderer.height))
     // blur filter looks cool, but has huge performance penalty
-    // const blur = new PIXI.filters.BlurFilter(20, 2)
+    // const blur = new PIXI.BlurFilter(20, 2)
     // pod.filters = [blur]
     pod.pivot.x = pod.width / 2
     pod.pivot.y = pod.height / 2
@@ -424,9 +424,9 @@ export default class App {
     pod._progress = 0
     originalPod.visible = false
     const that = this
-    const tick = function (t) {
+    const tick = function (ticker) {
       // progress goes from 0 to 1
-      const progress = Math.min(1, pod._progress + (0.01 * t))
+      const progress = Math.min(1, pod._progress + (0.01 * ticker.deltaTime))
       const scale = 1 + ((1 - progress) * 140)
       pod._progress = progress
       pod.x = targetPosition.x + (distance * cos * (1 - progress))
@@ -449,18 +449,18 @@ export default class App {
   animatePodDeletion(originalPod, globalPosition) {
     const pod = new Pod(originalPod.pod, null, this.tooltip)
     pod.draw()
-    pod.blendMode = PIXI.BLEND_MODES.ADD
+    pod.blendMode = 'add'
     const globalCenter = new PIXI.Point(globalPosition.x + pod.width / 2, globalPosition.y + pod.height / 2)
-    const blur = new PIXI.filters.BlurFilter(4)
+    const blur = new PIXI.BlurFilter({ strength: 4 })
     pod.filters = [blur]
     pod.position = globalPosition.clone()
     pod.alpha = 1
     pod._progress = 1
     originalPod.destroy()
     const that = this
-    const tick = function (t) {
+    const tick = function (ticker) {
       // progress goes from 1 to 0
-      const progress = Math.max(0, pod._progress - (0.02 * t))
+      const progress = Math.max(0, pod._progress - (0.02 * ticker.deltaTime))
       const scale = 1 + ((1 - progress) * 8)
       pod._progress = progress
       pod.alpha = progress
@@ -559,7 +559,8 @@ export default class App {
     }
   }
 
-  tick(time) {
+  tick(ticker) {
+    const time = ticker.deltaTime
     const deltaX = this.viewContainerTargetPosition.x - this.viewContainer.x
     const deltaY = this.viewContainerTargetPosition.y - this.viewContainer.y
     if (Math.abs(deltaX) < 20 && Math.abs(deltaY) < 20) {
@@ -719,8 +720,8 @@ export default class App {
     this.connectTime = Date.now()
   }
 
-  run() {
-    this.initialize()
+  async run() {
+    await this.initialize()
     this.draw()
     this.connect()
 
