@@ -1,15 +1,31 @@
-# Build stage - install dependencies
+# JavaScript build stage
+FROM node:22-slim AS js-builder
+
+WORKDIR /build
+
+COPY app/package*.json ./
+RUN npm ci
+
+COPY app/ ./
+# Create output directory (webpack outputs to ../kube_ops_view/static/build)
+RUN mkdir -p /kube_ops_view/static/build && npm run build
+
+# Python build stage - install dependencies
+# hadolint ignore=DL3007
 FROM registry.access.redhat.com/ubi9/python-312:latest AS builder
 
 WORKDIR /opt/app-root/src
 
+# hadolint ignore=DL3002
 USER 0
 
 # Install build dependencies
+# hadolint ignore=DL3041
 RUN dnf install -y --nodocs gcc libffi-devel && \
     dnf clean all && \
     rm -rf /var/cache/dnf
 
+# hadolint ignore=DL3013
 RUN pip3 install --no-cache-dir "poetry>=2.0" poetry-plugin-export
 
 COPY poetry.lock pyproject.toml ./
@@ -26,6 +42,7 @@ RUN poetry export -f requirements.txt --only main -o requirements.txt && \
            /opt/app-root/lib*/python3.12/site-packages/_distutils_hack
 
 # Runtime stage - UBI10 minimal image (fewer CVEs)
+# hadolint ignore=DL3007
 FROM registry.access.redhat.com/ubi10/python-312-minimal:latest
 
 WORKDIR /opt/app-root/src
@@ -34,9 +51,12 @@ WORKDIR /opt/app-root/src
 COPY --from=builder /opt/app-root/lib64/python3.12/site-packages /opt/app-root/lib64/python3.12/site-packages
 COPY --from=builder /opt/app-root/lib/python3.12/site-packages /opt/app-root/lib/python3.12/site-packages
 
-# Copy application code (as root to allow sed modification)
+# Copy application code
 USER 0
 COPY kube_ops_view ./kube_ops_view
+
+# Copy JavaScript build output (webpack outputs to ../kube_ops_view/static/build relative to app/)
+COPY --from=js-builder /kube_ops_view/static/build ./kube_ops_view/static/build
 
 ARG VERSION=dev
 
