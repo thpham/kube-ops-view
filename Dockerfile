@@ -1,5 +1,5 @@
 # JavaScript build stage
-FROM node:22-slim AS js-builder
+FROM node:lts-slim AS js-builder
 
 WORKDIR /build
 
