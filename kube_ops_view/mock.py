@@ -92,25 +92,52 @@ def query_mock_cluster(cluster):
     index = int(cluster.id.split("-")[-1])
     nodes = {}
 
-    # Define availability zones for realistic distribution
     availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
 
-    for i in range(10):
-        # add/remove the second to last node every 13 seconds
-        if i == 8 and int(time.time() / 13) % 2 == 0:
+    # Node layout per pool:
+    #   Masters: 3 nodes, 1 per AZ (indices 0-2)
+    #   Infra:   3-5 nodes, at least 1 per AZ (indices 3-7)
+    #   Workers: 3-7 nodes per AZ (indices 8+)
+    #
+    # Use cluster index to vary infra/worker counts across mock clusters
+    infra_per_az = [1, 1, 1]  # base: 1 per AZ = 3 total
+    if index >= 1:
+        infra_per_az[0] = 2   # 4 total for cluster 1+
+    if index >= 2:
+        infra_per_az[1] = 2   # 5 total for cluster 2+
+
+    worker_per_az = [
+        3 + hash_int((index + 1) * 101) % 5,  # 3-7 for AZ a
+        3 + hash_int((index + 1) * 202) % 5,  # 3-7 for AZ b
+        3 + hash_int((index + 1) * 303) % 5,  # 3-7 for AZ c
+    ]
+
+    # Build node list: (role, az_index)
+    node_specs = []
+
+    # Masters: 1 per AZ
+    for az_i in range(3):
+        node_specs.append(("master", az_i))
+
+    # Infra: variable per AZ
+    for az_i in range(3):
+        for _ in range(infra_per_az[az_i]):
+            node_specs.append(("infra", az_i))
+
+    # Workers: 3-7 per AZ
+    for az_i in range(3):
+        for _ in range(worker_per_az[az_i]):
+            node_specs.append(("worker", az_i))
+
+    for i, (role, az_i) in enumerate(node_specs):
+        # add/remove one worker node every 13 seconds for dynamism
+        if role == "worker" and i == len(node_specs) - 1 and int(time.time() / 13) % 2 == 0:
             continue
+
         labels = {}
+        labels["topology.kubernetes.io/zone"] = availability_zones[az_i]
 
-        # Assign AZ based on node index (distribute across zones)
-        az = availability_zones[i % len(availability_zones)]
-        labels["topology.kubernetes.io/zone"] = az
-
-        # Assign node roles based on index for realistic pool distribution
-        # Nodes 0-2: master/control-plane nodes
-        # Nodes 3-4: infra nodes (some with worker role too for multi-role demo)
-        # Nodes 5-9: worker nodes
-        if i < 3:
-            # Master nodes
+        if role == "master":
             if index == 0:
                 labels["node-role.kubernetes.io/master"] = ""
                 labels["node-role.kubernetes.io/control-plane"] = ""
@@ -118,14 +145,9 @@ def query_mock_cluster(cluster):
                 labels["node-role.kubernetes.io/control-plane"] = ""
             else:
                 labels["kubernetes.io/role"] = "master"
-        elif i < 5:
-            # Infra nodes
+        elif role == "infra":
             labels["node-role.kubernetes.io/infra"] = ""
-            # Node 3 has both infra and worker roles (multi-role demo)
-            if i == 3:
-                labels["node-role.kubernetes.io/worker"] = ""
         else:
-            # Worker nodes
             labels["node-role.kubernetes.io/worker"] = ""
 
         pods = {}
@@ -158,10 +180,10 @@ def query_mock_cluster(cluster):
                 "allocatable": {"cpu": "7800m", "memory": "62Gi"},
             },
             "pods": pods,
-            # get data from containers (usage)
             "usage": {"cpu": f"{usage_cpu}m", "memory": f"{usage_memory}Mi"},
         }
         nodes[node["name"]] = node
+
     pod = generate_mock_pod(index, 11, index)
     unassigned_pods = {"{}/{}".format(pod["namespace"], pod["name"]): pod}
     return {
