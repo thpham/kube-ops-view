@@ -183,7 +183,8 @@ export default class Cluster extends PIXI.Graphics {
         if (showAZHeaders) {
           const azHeader = new PIXI.Graphics()
           azHeader.allowChildren = true
-          azHeader.rect(0, 0, azWidthPx, azHeaderHeight)
+          // Offset by -1 and widen by +2 to align with node 2px stroke (extends 1px outward each side)
+          azHeader.rect(-1, 0, azWidthPx + 2, azHeaderHeight)
           azHeader.fill({ color: poolColor, alpha: 0.15 })
           azHeader.stroke({ width: 1, color: poolColor, alpha: 0.4 })
 
@@ -241,7 +242,7 @@ export default class Cluster extends PIXI.Graphics {
     }
 
     // Place unassigned pods
-    let unassignedX = overallMaxX + 10
+    let unassignedX = overallMaxX + left  // Consistent spacing
     const unassignedY = top + poolHeaderHeight + 2
 
     for (const pod of Object.values(this.cluster.unassigned_pods)) {
@@ -259,9 +260,10 @@ export default class Cluster extends PIXI.Graphics {
     }
 
     // Draw pool header rects at correct width (after all content is positioned)
-    const poolHeaderWidth = overallMaxX - left
+    // Add +2 to account for node 2px stroke extending 1px outward on each side
+    const poolHeaderWidth = overallMaxX - left + 2
     for (const { header, color } of poolHeaders) {
-      header.rect(0, 0, poolHeaderWidth, poolHeaderHeight)
+      header.rect(-1, 0, poolHeaderWidth, poolHeaderHeight)
       header.fill({ color: color, alpha: 0.3 })
       header.stroke({ width: 1, color: color, alpha: 0.8 })
       this.addChild(header)
