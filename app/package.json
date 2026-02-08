@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
-    "@eslint/js": "^9.18.0",
+    "@eslint/js": "^10.0.1",
     "@babel/plugin-transform-runtime": "^7.24.0",
     "@babel/preset-env": "^7.24.0",
     "babel-loader": "^10.0.0",
