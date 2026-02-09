@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════
 // Kubernetes Galaxy — PixiJS v7 PoC
-// Interactive Cluster Dashboard
+// 3D Celestial Mechanics Edition
 // ═══════════════════════════════════════════
 
 var app = new PIXI.Application({
@@ -16,7 +16,20 @@ var H = window.innerHeight;
 var cx = W / 2;
 var cy = H / 2;
 var TAU = Math.PI * 2;
-var PERSPECTIVE = 0.7; // Y-axis compression → pseudo-3D inclined plane
+
+// 3D Camera — elevation angle above the galactic plane
+var ELEV_DEG = 40;
+var ELEV = ELEV_DEG * Math.PI / 180;
+var cosE = Math.cos(ELEV);
+var sinE = Math.sin(ELEV);
+
+// Kepler speed constants (Kepler 3rd law: n = K / a^1.5)
+var K_MASTER = 2.0;
+var K_NODE = 0.15;
+var K_POD = 0.8;
+
+// Simulation clock (frame-units, incremented by delta each tick)
+var simTime = 0;
 
 // ─── Utils ──────────────────────────────
 function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
@@ -37,6 +50,58 @@ function drawGlow(g, color, radius, alpha) {
     g.drawCircle(0, 0, (i / steps) * radius);
     g.endFill();
   }
+}
+
+// ─── 3D Projection ─────────────────────
+// Orthographic camera at ELEV degrees above the galactic (xz) plane
+// World: x = right, y = up (⊥ to galaxy), z = depth into scene
+// screenX = cx + x
+// screenY = cy − (y·cosE + z·sinE)
+// depth   = y·sinE − z·cosE   (higher → closer to camera → drawn on top)
+function project(x, y, z) {
+  return {
+    sx: cx + x,
+    sy: cy - (y * cosE + z * sinE),
+    depth: y * sinE - z * cosE,
+  };
+}
+
+// ─── Kepler Orbit Solver ────────────────
+// Solve Kepler's equation  M = E − e·sin(E)  for eccentric anomaly E
+function solveKepler(M, e) {
+  M = ((M % TAU) + TAU) % TAU;
+  var E = M;
+  for (var k = 0; k < 8; k++) {
+    var dE = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    E -= dE;
+    if (Math.abs(dE) < 1e-8) break;
+  }
+  return E;
+}
+
+// Compute 3D position from orbital elements + time
+// orb = { a, e, omega, i, node, M0, n }
+// (ox, oy, oz) = orbit center in world coords
+// eMod / nMod = optional load-distorted values
+function orbitPos3D(orb, time, ox, oy, oz, eMod, nMod) {
+  var e = (eMod !== undefined) ? eMod : orb.e;
+  var n = (nMod !== undefined) ? nMod : orb.n;
+  var M = orb.M0 + n * time;
+  var E = solveKepler(M, e);
+  var cosEA = Math.cos(E), sinEA = Math.sin(E);
+  var nu = Math.atan2(Math.sqrt(1 - e * e) * sinEA, cosEA - e);
+  var r = orb.a * (1 - e * cosEA);
+
+  var u = nu + orb.omega;
+  var cosU = Math.cos(u), sinU = Math.sin(u);
+  var cosI = Math.cos(orb.i), sinI = Math.sin(orb.i);
+  var cosN = Math.cos(orb.node), sinN = Math.sin(orb.node);
+
+  return {
+    x: ox + r * (cosN * cosU - sinN * sinU * cosI),
+    y: oy + r * sinU * sinI,
+    z: oz + r * (sinN * cosU + cosN * sinU * cosI),
+  };
 }
 
 // ─── Name Generators ─────────────────────
@@ -89,8 +154,6 @@ function pickNamespace() {
 var world = new PIXI.Container();
 world.eventMode = 'passive';
 app.stage.addChild(world);
-world.scale.set(1, PERSPECTIVE);
-world.y = cy * (1 - PERSPECTIVE);
 
 var layerNames = [
   'nebula', 'stars', 'spiralTrails', 'spiral',
@@ -102,6 +165,11 @@ layerNames.forEach(function (name) {
   layers[name] = new PIXI.Container();
   world.addChild(layers[name]);
 });
+
+// Depth sorting for 3D body layers
+layers.masters.sortableChildren = true;
+layers.nodes.sortableChildren = true;
+layers.pods.sortableChildren = true;
 
 layers.ui = new PIXI.Container();
 app.stage.addChild(layers.ui);
@@ -149,17 +217,20 @@ for (var si = 0; si < 900; si++) {
 }
 
 // ═════════════════════════════════════════
-// 3. Spiral Arms (galaxy structure)
+// 3. Spiral Arms (galaxy disk in 3D)
 // ═════════════════════════════════════════
+
+// Spiral container — scaleY compresses disk into 3D tilted ellipse
 var spiralContainer = new PIXI.Container();
 spiralContainer.x = cx; spiralContainer.y = cy;
+spiralContainer.scale.set(1, -sinE); // negative Y → matches 3D projection
 layers.spiral.addChild(spiralContainer);
 
-// Faint golden orbit rings
+// Faint golden orbit rings (projected as ellipses)
 var orbitRings = new PIXI.Graphics();
 for (var ri = 50; ri < Math.min(W, H) * 0.45; ri += 25) {
   orbitRings.lineStyle(0.5, 0xffd700, Math.max(0.015, 0.07 - ri * 0.0002));
-  orbitRings.drawCircle(cx, cy, ri);
+  orbitRings.drawEllipse(cx, cy, ri, ri * sinE);
 }
 layers.spiralTrails.addChild(orbitRings);
 
@@ -167,14 +238,14 @@ layers.spiralTrails.addChild(orbitRings);
 for (var arm = 0; arm < 3; arm++) {
   var baseAngle = (arm / 3) * TAU;
   for (var j = 0; j < 220; j++) {
-    var t = j / 220;
-    var angle = baseAngle + t * Math.PI * 3.8;
-    var radius = 30 + t * Math.min(W, H) * 0.44;
-    var spread = rand(-20, 20) * (0.5 + t);
+    var tFrac = j / 220;
+    var angle = baseAngle + tFrac * Math.PI * 3.8;
+    var radius = 30 + tFrac * Math.min(W, H) * 0.44;
+    var spread = rand(-20, 20) * (0.5 + tFrac);
     var p = new PIXI.Graphics();
-    var pSz = rand(0.4, 2.2) * (1 - t * 0.35);
-    var pAl = rand(0.25, 0.75) * (1 - t * 0.35);
-    var pCol = t < 0.2 ? 0xffffff : t < 0.45 ? 0xffd700 : t < 0.7 ? 0xff8c00 : 0xff4500;
+    var pSz = rand(0.4, 2.2) * (1 - tFrac * 0.35);
+    var pAl = rand(0.25, 0.75) * (1 - tFrac * 0.35);
+    var pCol = tFrac < 0.2 ? 0xffffff : tFrac < 0.45 ? 0xffd700 : tFrac < 0.7 ? 0xff8c00 : 0xff4500;
     p.beginFill(pCol, pAl);
     p.drawCircle(0, 0, pSz);
     p.endFill();
@@ -185,19 +256,19 @@ for (var arm = 0; arm < 3; arm++) {
 }
 
 // ═════════════════════════════════════════
-// 4. Control Plane — 3-body Masters
+// 4. Control Plane — 3 Masters (Kepler orbits)
 // ═════════════════════════════════════════
 var masterCfg = [
-  { color: 0x3498db, label: 'api-server' },
-  { color: 0xf1c40f, label: 'etcd' },
-  { color: 0x2ecc71, label: 'scheduler' },
+  { color: 0x3498db, label: 'api-server', a: 55 },
+  { color: 0xf1c40f, label: 'etcd',       a: 70 },
+  { color: 0x2ecc71, label: 'scheduler',  a: 85 },
 ];
 
-// Master orbit trail rings
+// Master orbit trail rings (projected ellipses)
 var mTrails = new PIXI.Graphics();
-[{ r: 55, c: 0x3498db }, { r: 70, c: 0xf1c40f }, { r: 85, c: 0x2ecc71 }].forEach(function (o) {
-  mTrails.lineStyle(0.7, o.c, 0.1);
-  mTrails.drawCircle(cx, cy, o.r);
+masterCfg.forEach(function (cfg) {
+  mTrails.lineStyle(0.7, cfg.color, 0.1);
+  mTrails.drawEllipse(cx, cy, cfg.a, cfg.a * sinE);
 });
 layers.masterTrails.addChild(mTrails);
 
@@ -218,10 +289,18 @@ var masters = masterCfg.map(function (cfg, i) {
   m.beginFill(0xffffff, 0.5);   m.drawCircle(0, 0, 6);  m.endFill();
 
   m._glow = glow;
-  m._orbitR = 55 + i * 15;
-  m._a = (TAU / 3) * i + rand(0, 0.5);
-  m._spd = 0.005 + i * 0.0012;
   m._label = cfg.label;
+
+  // Kepler orbital elements
+  m._orb = {
+    a: cfg.a,
+    e: rand(0.04, 0.15),
+    omega: rand(0, TAU),
+    i: rand(-0.18, 0.18),    // ±10° orbital inclination
+    node: (TAU / 3) * i + rand(-0.3, 0.3),
+    M0: rand(0, TAU),
+    n: K_MASTER / Math.pow(cfg.a, 1.5),  // Kepler 3rd law
+  };
 
   // Interactive
   m.eventMode = 'static';
@@ -237,27 +316,33 @@ var masters = masterCfg.map(function (cfg, i) {
 });
 
 // ═════════════════════════════════════════
-// 5. Node Pools (star clusters)
+// 5. Node Pools (star clusters — Kepler 3D)
 // ═════════════════════════════════════════
 var poolDefs = [
-  { name: 'default-pool',    color: 0x2ecc71, a: -0.7, d: 0.37, r: 110 },
-  { name: 'gpu-pool',        color: 0xe74c3c, a: 0.4,  d: 0.42, r: 100 },
-  { name: 'memory-pool',     color: 0xf1c40f, a: 1.3,  d: 0.34, r: 95  },
-  { name: 'compute-pool',    color: 0xe67e22, a: 2.2,  d: 0.40, r: 105 },
-  { name: 'ingress-pool',    color: 0x9b59b6, a: 3.3,  d: 0.32, r: 85  },
+  { name: 'default-pool',     color: 0x2ecc71, a: -0.7, d: 0.37, r: 110 },
+  { name: 'gpu-pool',         color: 0xe74c3c, a: 0.4,  d: 0.42, r: 100 },
+  { name: 'memory-pool',      color: 0xf1c40f, a: 1.3,  d: 0.34, r: 95  },
+  { name: 'compute-pool',     color: 0xe67e22, a: 2.2,  d: 0.40, r: 105 },
+  { name: 'ingress-pool',     color: 0x9b59b6, a: 3.3,  d: 0.32, r: 85  },
   { name: 'monitoring-pool',  color: 0x3498db, a: 4.6,  d: 0.37, r: 90  },
 ];
 
 var totalPods = 0;
 var totalFailed = 0;
 var pools = [];
-var allPods = []; // flat list for traffic system
+var allPods = [];
 
 poolDefs.forEach(function (def) {
   var dist = def.d * Math.min(W, H);
+
+  // Pool 3D position (in galactic plane, y = 0)
+  var x3d = Math.cos(def.a) * dist;
+  var z3d = Math.sin(def.a) * dist;
+  var proj = project(x3d, 0, z3d);
+
   var pool = {
-    x: cx + Math.cos(def.a) * dist,
-    y: cy + Math.sin(def.a) * dist,
+    _x3d: x3d, _y3d: 0, _z3d: z3d,
+    sx: proj.sx, sy: proj.sy,
     r: def.r,
     color: def.color,
     name: def.name,
@@ -270,23 +355,27 @@ poolDefs.forEach(function (def) {
     _glowGfx: null,
   };
 
-  // ── Border ring (centered at origin for scaling) ──
+  // ── Border ring (projected ellipse) ──
   var border = new PIXI.Graphics();
   border.lineStyle(1.2, def.color, 0.2);
-  border.drawCircle(0, 0, pool.r);
+  border.drawEllipse(0, 0, pool.r, pool.r * sinE);
   for (var ba = 0; ba < TAU; ba += 0.1) {
     border.beginFill(def.color, 0.1);
-    border.drawCircle(Math.cos(ba) * pool.r, Math.sin(ba) * pool.r, 1.2);
+    border.drawCircle(
+      Math.cos(ba) * pool.r,
+      Math.sin(ba) * pool.r * sinE,
+      1.2
+    );
     border.endFill();
   }
-  border.x = pool.x; border.y = pool.y;
+  border.x = pool.sx; border.y = pool.sy;
   pool._border = border;
   layers.poolBorders.addChild(border);
 
   // ── Pool ambient glow ──
   var pg = new PIXI.Graphics();
   drawGlow(pg, def.color, pool.r * 0.7, 0.006);
-  pg.x = pool.x; pg.y = pool.y;
+  pg.x = pool.sx; pg.y = pool.sy;
   pool._glowGfx = pg;
   layers.poolGlow.addChild(pg);
 
@@ -295,7 +384,8 @@ poolDefs.forEach(function (def) {
     fontFamily: 'monospace', fontSize: 10, fill: def.color,
   });
   label.anchor.set(0.5);
-  label.x = pool.x; label.y = pool.y - pool.r - 14;
+  label.x = pool.sx;
+  label.y = pool.sy - pool.r * sinE - 14;
   label.alpha = 0.65;
   label._pool = pool;
   label.eventMode = 'static';
@@ -314,7 +404,7 @@ poolDefs.forEach(function (def) {
   label.on('pointerout', hideTooltip);
   layers.poolBorders.addChild(label);
 
-  // ── Nodes ──
+  // ── Nodes (Kepler 3D orbits) ──
   var nCount = randI(3, 7);
   for (var n = 0; n < nCount; n++) {
     var node = new PIXI.Graphics();
@@ -323,8 +413,17 @@ poolDefs.forEach(function (def) {
     node.lineStyle(1, def.color, 0.45); node.drawCircle(0, 0, nr);
     node.beginFill(def.color, 0.35); node.drawCircle(0, 0, 3); node.endFill();
 
-    node._a = (TAU / nCount) * n + rand(-0.3, 0.3);
-    node._d = rand(16, pool.r * 0.55);
+    var nodeDist = rand(16, pool.r * 0.55);
+    node._orb = {
+      a: nodeDist,
+      e: rand(0.03, 0.12),
+      omega: rand(0, TAU),
+      i: rand(-0.35, 0.35),    // ±20° inclination
+      node: rand(0, TAU),
+      M0: (TAU / nCount) * n + rand(-0.3, 0.3),
+      n: K_NODE / Math.pow(nodeDist, 1.5),
+    };
+
     node._name = genNodeName(def.name, n);
     node._cpu = randI(20, 80);
     node._mem = randI(30, 90);
@@ -352,7 +451,7 @@ poolDefs.forEach(function (def) {
     layers.poolGlow.addChild(ng);
   }
 
-  // ── Pods ──
+  // ── Pods (Kepler 3D orbits) ──
   var pCount = randI(30, 55);
   for (var pi = 0; pi < pCount; pi++) {
     var roll = Math.random();
@@ -370,9 +469,17 @@ poolDefs.forEach(function (def) {
     var col = statusColor(status);
     pod.beginFill(col); pod.drawCircle(0, 0, ps); pod.endFill();
 
-    pod._a = rand(0, TAU);
-    pod._d = rand(pool.r * 0.15, pool.r + 32);
-    pod._spd = rand(0.002, 0.007);
+    var podDist = rand(pool.r * 0.15, pool.r + 32);
+    pod._orb = {
+      a: podDist,
+      e: rand(0.02, 0.10),
+      omega: rand(0, TAU),
+      i: rand(-0.30, 0.30),    // ±17° inclination
+      node: rand(0, TAU),
+      M0: rand(0, TAU),
+      n: K_POD / Math.pow(podDist, 1.5),
+    };
+
     pod._status = status;
     pod._name = genPodName();
     pod._nsName = ns.name;
@@ -417,17 +524,16 @@ layers.constellations.addChild(constellationGfx);
 var constellationFrame = 0;
 
 pools.forEach(function (pool) {
-  // Group pods by namespace
   var groups = {};
   pool.pods.forEach(function (pod) {
     if (!groups[pod._nsName]) groups[pod._nsName] = [];
     groups[pod._nsName].push(pod);
   });
-  // For each group, connect angular neighbors into a polygon
   Object.keys(groups).forEach(function (nsName) {
     var group = groups[nsName];
     if (group.length < 2) return;
-    group.sort(function (a, b) { return a._a - b._a; });
+    // Sort by initial mean anomaly for stable ordering
+    group.sort(function (a, b) { return a._orb.M0 - b._orb.M0; });
     var nsColor = group[0]._nsColor;
     for (var ci = 0; ci < group.length - 1; ci++) {
       constellationLinks.push({ a: group[ci], b: group[ci + 1], color: nsColor });
@@ -453,7 +559,7 @@ pools.forEach(function (pool) {
     w.beginFill(0xffffff);
     w.drawRect(-1, -5, 2, 6); w.drawCircle(0, 4.5, 1.2);
     w.endFill();
-    w.x = pool.x; w.y = pool.y + pool.r + 18;
+    w.x = pool.sx; w.y = pool.sy + pool.r * sinE + 18;
     w._pulse = true;
     layers.warnings.addChild(w);
   }
@@ -630,157 +736,7 @@ addMetric(mx + 275, 'Pods:', String(totalPods), 0x3498db, false);
 addMetric(mx + 365, 'Failed:', String(totalFailed), 0xe74c3c, false);
 
 // ═════════════════════════════════════════
-// 12. Time Travel System
-// ═════════════════════════════════════════
-var timeline = {
-  snapshots: [],
-  maxLen: 180,
-  playing: false,
-  playHead: 0,
-  frameCount: 0,
-  recordInterval: 60,
-  dragging: false,
-};
-
-function countFailed() {
-  var count = 0;
-  pools.forEach(function (pool) {
-    pool.pods.forEach(function (pod) {
-      if (pod._status === 'error' || pod._status === 'oomkilled') count++;
-    });
-  });
-  return count;
-}
-
-function recordSnapshot() {
-  var snap = {
-    time: Date.now(),
-    failed: countFailed(),
-    incident: false,
-    masters: masters.map(function (m) { return m._a; }),
-    pools: pools.map(function (pool) {
-      return {
-        load: pool._load,
-        nodes: pool.nodes.map(function (nd) { return nd._a; }),
-        pods: pool.pods.map(function (pd) { return { a: pd._a, status: pd._status }; }),
-      };
-    }),
-  };
-  if (timeline.snapshots.length > 0) {
-    snap.incident = snap.failed > timeline.snapshots[timeline.snapshots.length - 1].failed;
-  }
-  timeline.snapshots.push(snap);
-  if (timeline.snapshots.length > timeline.maxLen) {
-    timeline.snapshots.shift();
-    if (timeline.playHead > 0) timeline.playHead--;
-  }
-}
-
-function applySnapshot(idx) {
-  var snap = timeline.snapshots[idx];
-  if (!snap) return;
-  for (var i = 0; i < masters.length && i < snap.masters.length; i++) {
-    masters[i]._a = snap.masters[i];
-  }
-  for (var pi = 0; pi < pools.length && pi < snap.pools.length; pi++) {
-    var pool = pools[pi], ps = snap.pools[pi];
-    pool._load = ps.load;
-    for (var ni = 0; ni < pool.nodes.length && ni < ps.nodes.length; ni++) {
-      pool.nodes[ni]._a = ps.nodes[ni];
-    }
-    for (var pj = 0; pj < pool.pods.length && pj < ps.pods.length; pj++) {
-      pool.pods[pj]._a = ps.pods[pj].a;
-      pool.pods[pj]._status = ps.pods[pj].status;
-    }
-  }
-}
-
-// ── Timeline UI ──
-var tlBarX = cx - 240, tlBarY = H - 108;
-var tlBarW = 480, tlBarH = 18;
-
-var tlBarBg = new PIXI.Graphics();
-tlBarBg.beginFill(0x0a1628, 0.85);
-tlBarBg.drawRoundedRect(tlBarX - 10, tlBarY - 5, tlBarW + 75, tlBarH + 10, 6);
-tlBarBg.endFill();
-tlBarBg.lineStyle(1, 0x1e3a5f, 0.4);
-tlBarBg.drawRoundedRect(tlBarX - 10, tlBarY - 5, tlBarW + 75, tlBarH + 10, 6);
-layers.ui.addChild(tlBarBg);
-
-var tlTrack = new PIXI.Graphics();
-tlTrack.beginFill(0x1a2a3a);
-tlTrack.drawRoundedRect(tlBarX, tlBarY, tlBarW, tlBarH, 4);
-tlTrack.endFill();
-layers.ui.addChild(tlTrack);
-
-var tlFill = new PIXI.Graphics();
-layers.ui.addChild(tlFill);
-
-var tlMarkers = new PIXI.Graphics();
-layers.ui.addChild(tlMarkers);
-
-var tlHead = new PIXI.Graphics();
-tlHead.beginFill(0xecf0f1); tlHead.drawCircle(0, 0, 6); tlHead.endFill();
-tlHead.beginFill(0x0a1628);  tlHead.drawCircle(0, 0, 3); tlHead.endFill();
-tlHead.y = tlBarY + tlBarH / 2;
-tlHead.visible = false;
-layers.ui.addChild(tlHead);
-
-// Hit area for timeline drag
-var tlHit = new PIXI.Graphics();
-tlHit.beginFill(0x000000, 0.001);
-tlHit.drawRect(tlBarX, tlBarY - 5, tlBarW, tlBarH + 10);
-tlHit.endFill();
-tlHit.eventMode = 'static';
-tlHit.cursor = 'pointer';
-layers.ui.addChild(tlHit);
-
-function setPlayheadFromEvent(e) {
-  var len = timeline.snapshots.length;
-  if (len < 2) return;
-  var pct = Math.max(0, Math.min(1, (e.global.x - tlBarX) / tlBarW));
-  timeline.playHead = Math.round(pct * (len - 1));
-  timeline.playing = true;
-}
-
-tlHit.on('pointerdown', function (e) {
-  timeline.dragging = true;
-  setPlayheadFromEvent(e);
-});
-app.stage.on('pointermove', function (e) {
-  if (timeline.dragging) setPlayheadFromEvent(e);
-});
-app.stage.on('pointerup', function () {
-  timeline.dragging = false;
-});
-
-// LIVE button
-var liveBtn = new PIXI.Graphics();
-liveBtn.beginFill(0x2ecc71); liveBtn.drawCircle(0, 0, 7); liveBtn.endFill();
-liveBtn.x = tlBarX + tlBarW + 30;
-liveBtn.y = tlBarY + tlBarH / 2;
-liveBtn.eventMode = 'static';
-liveBtn.cursor = 'pointer';
-liveBtn.on('pointerdown', function () { timeline.playing = false; });
-layers.ui.addChild(liveBtn);
-
-var liveTxt = new PIXI.Text('LIVE', {
-  fontFamily: 'monospace', fontSize: 9, fill: 0x2ecc71, fontWeight: 'bold',
-});
-liveTxt.anchor.set(0.5);
-liveTxt.x = liveBtn.x; liveTxt.y = liveBtn.y + 14;
-layers.ui.addChild(liveTxt);
-
-var replayTxt = new PIXI.Text('REPLAY', {
-  fontFamily: 'monospace', fontSize: 12, fill: 0xe74c3c, fontWeight: 'bold',
-});
-replayTxt.anchor.set(0.5);
-replayTxt.x = cx; replayTxt.y = tlBarY - 14;
-replayTxt.visible = false;
-layers.ui.addChild(replayTxt);
-
-// ═════════════════════════════════════════
-// 13. Zoom & Pan
+// 12. Zoom & Pan (uniform scale — 3D handled by projection)
 // ═════════════════════════════════════════
 var zoomText = new PIXI.Text('1.0x', {
   fontFamily: 'monospace', fontSize: 11, fill: 0x556677,
@@ -796,18 +752,17 @@ app.view.addEventListener('wheel', function (e) {
   var mX = e.offsetX, mY = e.offsetY;
   world.x = mX - (mX - world.x) * (newScale / oldScale);
   world.y = mY - (mY - world.y) * (newScale / oldScale);
-  world.scale.set(newScale, newScale * PERSPECTIVE);
+  world.scale.set(newScale); // uniform — no PERSPECTIVE ratio needed
   zoomText.text = newScale.toFixed(1) + 'x';
 }, { passive: false });
 
-// Free left-click drag to pan (3px dead zone to avoid tooltip jitter)
+// Free left-click drag to pan (3px dead zone)
 var PAN_THRESHOLD = 3;
 var panning = false, panPending = false;
 var panStart = { x: 0, y: 0 }, worldStart = { x: 0, y: 0 };
 
 app.view.addEventListener('pointerdown', function (e) {
-  // Left-click in main view area (skip header & footer/timeline regions)
-  if (e.button === 0 && e.offsetY > 55 && e.offsetY < H - 120) {
+  if (e.button === 0 && e.offsetY > 55 && e.offsetY < H - 70) {
     panPending = true;
     panning = false;
     panStart.x = e.clientX; panStart.y = e.clientY;
@@ -836,14 +791,14 @@ app.view.addEventListener('pointerup', function () {
   }
 });
 
-// Double-click to reset view (restores perspective)
+// Double-click to reset view
 var lastClickTime = 0;
 app.view.addEventListener('click', function () {
   var now = Date.now();
   if (now - lastClickTime < 300) {
-    world.scale.set(1, PERSPECTIVE);
+    world.scale.set(1);
     world.x = 0;
-    world.y = cy * (1 - PERSPECTIVE);
+    world.y = 0;
     zoomText.text = '1.0x';
   }
   lastClickTime = now;
@@ -852,65 +807,47 @@ app.view.addEventListener('click', function () {
 app.view.style.cursor = 'grab';
 
 // ═════════════════════════════════════════
-// 14. Animation Loop
+// 13. Animation Loop
 // ═════════════════════════════════════════
 app.ticker.add(function (delta) {
   var t = Date.now();
-  var isLive = !timeline.playing;
+  simTime += delta;
 
-  // ── Time Travel: record or playback ──
-  if (isLive) {
-    timeline.frameCount++;
-    if (timeline.frameCount >= timeline.recordInterval) {
-      recordSnapshot();
-      timeline.frameCount = 0;
-    }
-  } else {
-    applySnapshot(timeline.playHead);
-  }
-
-  // ── Star twinkling (always) ──
+  // ── Star twinkling ──
   for (var sti = 0; sti < starList.length; sti++) {
     var star = starList[sti];
     star.alpha = star._br * (0.5 + Math.sin(t * star._tw + star._tp) * 0.5);
   }
 
-  // ── Spiral rotation (always) ──
+  // ── Spiral rotation ──
   spiralContainer.rotation += 0.00015 * delta;
 
-  // ── Advance simulation (live only) ──
-  if (isLive) {
-    for (var mi = 0; mi < masters.length; mi++) {
-      masters[mi]._a += masters[mi]._spd * delta;
-    }
-    for (var pli = 0; pli < pools.length; pli++) {
-      var pool = pools[pli];
-      pool._load = 0.3 + 0.3 * Math.sin(t * pool._loadFreq + pool._loadPhase);
-      if (Math.random() < 0.0003) pool._load = Math.min(1, pool._load + 0.3);
-      for (var ni = 0; ni < pool.nodes.length; ni++) {
-        pool.nodes[ni]._a += (0.0008 + pool._load * 0.003) * delta;
-      }
-      for (var pj = 0; pj < pool.pods.length; pj++) {
-        pool.pods[pj]._a += pool.pods[pj]._spd * (1 + pool._load * 0.5) * delta;
-      }
-    }
+  // ── Pool load drift ──
+  for (var pli = 0; pli < pools.length; pli++) {
+    var pool = pools[pli];
+    pool._load = 0.3 + 0.3 * Math.sin(t * pool._loadFreq + pool._loadPhase);
+    if (Math.random() < 0.0003) pool._load = Math.min(1, pool._load + 0.3);
   }
 
-  // ── Render master positions ──
-  for (var mi2 = 0; mi2 < masters.length; mi2++) {
-    var m = masters[mi2];
-    m.x = cx + Math.cos(m._a) * m._orbitR;
-    m.y = cy + Math.sin(m._a * 1.1) * m._orbitR;
-    m._glow.x = m.x; m._glow.y = m.y;
-    m._glow.scale.set(1 + Math.sin(t * 0.002 + m._a) * 0.12);
+  // ── Masters — Kepler 3D orbits ──
+  for (var mi = 0; mi < masters.length; mi++) {
+    var m = masters[mi];
+    var mPos = orbitPos3D(m._orb, simTime, 0, 0, 0);
+    var mProj = project(mPos.x, mPos.y, mPos.z);
+    m.x = mProj.sx;
+    m.y = mProj.sy;
+    m.zIndex = Math.round(mProj.depth * 10);
+    m._glow.x = mProj.sx;
+    m._glow.y = mProj.sy;
+    m._glow.scale.set(1 + Math.sin(t * 0.002 + simTime * m._orb.n) * 0.12);
   }
 
-  // ── Render pool nodes & pods ──
+  // ── Nodes & Pods — Kepler 3D with load distortion ──
   for (var pli2 = 0; pli2 < pools.length; pli2++) {
     var pool2 = pools[pli2];
     var load = pool2._load;
 
-    // Border gravitational distortion
+    // Border gravitational breathing
     if (pool2._border) {
       pool2._border.scale.set(1 + load * 0.04 * Math.sin(t / 600));
     }
@@ -918,22 +855,29 @@ app.ticker.add(function (delta) {
       pool2._glowGfx.alpha = 0.5 + load * 0.5;
     }
 
-    // Nodes
-    for (var ni2 = 0; ni2 < pool2.nodes.length; ni2++) {
-      var node = pool2.nodes[ni2];
-      node.x = pool2.x + Math.cos(node._a) * node._d;
-      node.y = pool2.y + Math.sin(node._a) * node._d;
-      if (node._glow) { node._glow.x = node.x; node._glow.y = node.y; }
+    // Nodes — Kepler 3D, speed boosted by load
+    for (var ni = 0; ni < pool2.nodes.length; ni++) {
+      var node = pool2.nodes[ni];
+      var nN = node._orb.n * (1 + load * 0.3);
+      var nPos = orbitPos3D(node._orb, simTime, pool2._x3d, pool2._y3d, pool2._z3d, undefined, nN);
+      var nProj = project(nPos.x, nPos.y, nPos.z);
+      node.x = nProj.sx;
+      node.y = nProj.sy;
+      node.zIndex = Math.round(nProj.depth * 10);
+      if (node._glow) { node._glow.x = nProj.sx; node._glow.y = nProj.sy; }
     }
 
-    // Pods with gravitational distortion
-    for (var pj2 = 0; pj2 < pool2.pods.length; pj2++) {
-      var pod = pool2.pods[pj2];
-      var eccX = 1 + load * 0.3 * Math.sin(pod._a * 2 + pool2._loadPhase);
-      var eccY = 1 - load * 0.3 * Math.cos(pod._a * 2 + pool2._loadPhase);
-      pod.x = pool2.x + Math.cos(pod._a) * pod._d * eccX;
-      pod.y = pool2.y + Math.sin(pod._a) * pod._d * eccY;
-      if (pod._glow) { pod._glow.x = pod.x; pod._glow.y = pod.y; }
+    // Pods — Kepler 3D, eccentricity + speed boosted by load
+    for (var pj = 0; pj < pool2.pods.length; pj++) {
+      var pod = pool2.pods[pj];
+      var pE = Math.min(0.8, pod._orb.e + load * 0.15);
+      var pN = pod._orb.n * (1 + load * 0.5);
+      var pPos = orbitPos3D(pod._orb, simTime, pool2._x3d, pool2._y3d, pool2._z3d, pE, pN);
+      var pProj = project(pPos.x, pPos.y, pPos.z);
+      pod.x = pProj.sx;
+      pod.y = pProj.sy;
+      pod.zIndex = Math.round(pProj.depth * 10);
+      if (pod._glow) { pod._glow.x = pProj.sx; pod._glow.y = pProj.sy; }
       if (pod._status === 'error' || pod._status === 'oomkilled') {
         pod.scale.set(1 + Math.sin(t / 150) * 0.35);
       }
@@ -959,26 +903,24 @@ app.ticker.add(function (delta) {
   }
 
   // ── Network traffic beams ──
-  if (isLive) {
-    trafficSpawnCounter++;
-    if (trafficSpawnCounter >= 40 && trafficBeams.length < 25) {
-      trafficSpawnCounter = 0;
-      var spawnCount = randI(1, 4);
-      for (var bi = 0; bi < spawnCount && trafficBeams.length < 25; bi++) {
-        var srcIdx = randI(0, allPods.length);
-        var dstIdx = randI(0, allPods.length);
-        if (srcIdx === dstIdx) continue;
-        var isCross = allPods[srcIdx].pool !== allPods[dstIdx].pool;
-        trafficBeams.push({
-          src: allPods[srcIdx].pod,
-          dst: allPods[dstIdx].pod,
-          progress: 0,
-          speed: rand(0.008, 0.02),
-          color: isCross ? 0xff88ff : 0x00ffff,
-          midX: rand(-30, 30),
-          midY: rand(-30, 30),
-        });
-      }
+  trafficSpawnCounter++;
+  if (trafficSpawnCounter >= 40 && trafficBeams.length < 25) {
+    trafficSpawnCounter = 0;
+    var spawnCount = randI(1, 4);
+    for (var bi = 0; bi < spawnCount && trafficBeams.length < 25; bi++) {
+      var srcIdx = randI(0, allPods.length);
+      var dstIdx = randI(0, allPods.length);
+      if (srcIdx === dstIdx) continue;
+      var isCross = allPods[srcIdx].pool !== allPods[dstIdx].pool;
+      trafficBeams.push({
+        src: allPods[srcIdx].pod,
+        dst: allPods[dstIdx].pod,
+        progress: 0,
+        speed: rand(0.008, 0.02),
+        color: isCross ? 0xff88ff : 0x00ffff,
+        midX: rand(-30, 30),
+        midY: rand(-30, 30),
+      });
     }
   }
 
@@ -987,19 +929,16 @@ app.ticker.add(function (delta) {
     var beam = trafficBeams[ti];
     beam.progress += beam.speed * delta;
     if (beam.progress >= 1) { trafficBeams.splice(ti, 1); continue; }
-    var sx = beam.src.x, sy = beam.src.y;
-    var dx = beam.dst.x, dy = beam.dst.y;
-    var bmx = (sx + dx) / 2 + beam.midX;
-    var bmy = (sy + dy) / 2 + beam.midY;
+    var bsx = beam.src.x, bsy = beam.src.y;
+    var bdx = beam.dst.x, bdy = beam.dst.y;
+    var bmx = (bsx + bdx) / 2 + beam.midX;
+    var bmy = (bsy + bdy) / 2 + beam.midY;
     var prog = beam.progress;
     var invP = 1 - prog;
-    // Quadratic bezier
-    var bx = invP * invP * sx + 2 * invP * prog * bmx + prog * prog * dx;
-    var by = invP * invP * sy + 2 * invP * prog * bmy + prog * prog * dy;
-    // Trail line
+    var bx = invP * invP * bsx + 2 * invP * prog * bmx + prog * prog * bdx;
+    var by = invP * invP * bsy + 2 * invP * prog * bmy + prog * prog * bdy;
     trafficGfx.lineStyle(0.5, beam.color, 0.12);
-    trafficGfx.moveTo(sx, sy); trafficGfx.lineTo(bx, by);
-    // Particle
+    trafficGfx.moveTo(bsx, bsy); trafficGfx.lineTo(bx, by);
     trafficGfx.lineStyle(0);
     trafficGfx.beginFill(beam.color, 0.8); trafficGfx.drawCircle(bx, by, 2); trafficGfx.endFill();
     trafficGfx.beginFill(beam.color, 0.15); trafficGfx.drawCircle(bx, by, 5); trafficGfx.endFill();
@@ -1018,35 +957,4 @@ app.ticker.add(function (delta) {
     if (tooltip.x + tooltip.width > W) tooltip.x = mousePos.x - tooltip.width - 10;
     if (tooltip.y + tooltip.height > H) tooltip.y = mousePos.y - tooltip.height - 10;
   }
-
-  // ── Timeline UI update ──
-  var snapLen = timeline.snapshots.length;
-  tlFill.clear();
-  tlMarkers.clear();
-  if (snapLen > 1) {
-    var fillPct = snapLen / timeline.maxLen;
-    tlFill.beginFill(0x2a3a4a);
-    tlFill.drawRoundedRect(tlBarX, tlBarY, tlBarW * fillPct, tlBarH, 4);
-    tlFill.endFill();
-    for (var sni = 0; sni < snapLen; sni++) {
-      if (timeline.snapshots[sni].incident) {
-        var markX = tlBarX + (sni / (snapLen - 1)) * tlBarW * fillPct;
-        tlMarkers.beginFill(0xe74c3c, 0.8);
-        tlMarkers.drawRect(markX - 1, tlBarY, 2, tlBarH);
-        tlMarkers.endFill();
-      }
-    }
-  }
-  if (timeline.playing && snapLen > 1) {
-    tlHead.visible = true;
-    tlHead.x = tlBarX + (timeline.playHead / (snapLen - 1)) * tlBarW;
-    replayTxt.visible = true;
-    replayTxt.alpha = 0.6 + Math.sin(t / 400) * 0.4;
-  } else {
-    tlHead.visible = false;
-    replayTxt.visible = false;
-  }
-
-  // LIVE button pulse
-  liveBtn.alpha = isLive ? (0.7 + Math.sin(t / 500) * 0.3) : 0.3;
 });
