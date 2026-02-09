@@ -320,6 +320,7 @@ var masters = masterCfg.map(function (cfg, i) {
 
   m._glow = glow;
   m._label = cfg.label;
+  m._vr = 16;
 
   // Kepler orbital elements
   m._orb = {
@@ -465,6 +466,7 @@ poolDefs.forEach(function (def) {
       n: K_NODE / Math.pow(nodeDist, 1.5),
     };
 
+    node._vr = nr;
     node._name = genNodeName(def.name, n);
     node._cpu = randI(20, 80);
     node._mem = randI(30, 90);
@@ -522,6 +524,7 @@ poolDefs.forEach(function (def) {
       n: K_POD / Math.pow(podDist, 1.5),
     };
 
+    pod._vr = ps;
     pod._status = status;
     pod._name = genPodName();
     pod._nsName = ns.name;
@@ -928,6 +931,66 @@ app.ticker.add(function (delta) {
       if (pod._status === 'highcpu') {
         pod.alpha = 0.6 + Math.sin(t / 80) * 0.4;
       }
+    }
+  }
+
+  // ── Collision avoidance (screen-space soft repulsion) ──
+  var COL_PAD = 2;
+  var COL_DAMP = 0.35;
+
+  // Within each pool: nodes + pods
+  for (var cpi = 0; cpi < pools.length; cpi++) {
+    var cBodies = pools[cpi].nodes.concat(pools[cpi].pods);
+    for (var ca = 0; ca < cBodies.length; ca++) {
+      for (var cb = ca + 1; cb < cBodies.length; cb++) {
+        var cdx = cBodies[cb].x - cBodies[ca].x;
+        var cdy = cBodies[cb].y - cBodies[ca].y;
+        var cdSq = cdx * cdx + cdy * cdy;
+        var cMinD = cBodies[ca]._vr + cBodies[cb]._vr + COL_PAD;
+        if (cdSq < cMinD * cMinD && cdSq > 0.01) {
+          var cDist = Math.sqrt(cdSq);
+          var cPush = (cMinD - cDist) * COL_DAMP / cDist;
+          cBodies[ca].x -= cdx * cPush;
+          cBodies[ca].y -= cdy * cPush;
+          cBodies[cb].x += cdx * cPush;
+          cBodies[cb].y += cdy * cPush;
+        }
+      }
+    }
+  }
+
+  // Masters (3 bodies → 3 pair checks)
+  for (var cma = 0; cma < masters.length; cma++) {
+    for (var cmb = cma + 1; cmb < masters.length; cmb++) {
+      var mcdx = masters[cmb].x - masters[cma].x;
+      var mcdy = masters[cmb].y - masters[cma].y;
+      var mcdSq = mcdx * mcdx + mcdy * mcdy;
+      var mcMin = masters[cma]._vr + masters[cmb]._vr + 4;
+      if (mcdSq < mcMin * mcMin && mcdSq > 0.01) {
+        var mcDist = Math.sqrt(mcdSq);
+        var mcPush = (mcMin - mcDist) * COL_DAMP / mcDist;
+        masters[cma].x -= mcdx * mcPush;
+        masters[cma].y -= mcdy * mcPush;
+        masters[cmb].x += mcdx * mcPush;
+        masters[cmb].y += mcdy * mcPush;
+      }
+    }
+  }
+
+  // Re-sync glow positions after nudge
+  for (var gmi = 0; gmi < masters.length; gmi++) {
+    masters[gmi]._glow.x = masters[gmi].x;
+    masters[gmi]._glow.y = masters[gmi].y;
+  }
+  for (var gpi = 0; gpi < pools.length; gpi++) {
+    var gPool = pools[gpi];
+    for (var gni = 0; gni < gPool.nodes.length; gni++) {
+      var gn = gPool.nodes[gni];
+      if (gn._glow) { gn._glow.x = gn.x; gn._glow.y = gn.y; }
+    }
+    for (var gpj = 0; gpj < gPool.pods.length; gpj++) {
+      var gp = gPool.pods[gpj];
+      if (gp._glow) { gp._glow.x = gp.x; gp._glow.y = gp.y; }
     }
   }
 
