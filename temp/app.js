@@ -52,6 +52,30 @@ function drawGlow(g, color, radius, alpha) {
   }
 }
 
+// ─── 3D Sphere Texture ──────────────────
+// Canvas radial gradient → grayscale sphere, tinted per-body via Sprite.tint
+function createSphereTexture(size) {
+  var c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  var ctx = c.getContext('2d');
+  var r = size / 2;
+  // Upper-left light source → 3D curvature illusion
+  var g = ctx.createRadialGradient(r * 0.62, r * 0.35, r * 0.05, r, r, r);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.15, '#e0e0e0');
+  g.addColorStop(0.40, '#999999');
+  g.addColorStop(0.70, '#444444');
+  g.addColorStop(0.92, '#151515');
+  g.addColorStop(1, 'rgba(0,0,0,0)'); // soft transparent edge
+  ctx.beginPath();
+  ctx.arc(r, r, r, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+  return PIXI.Texture.from(c);
+}
+
+var sphereTex = createSphereTexture(64);
+
 // ─── 3D Projection ─────────────────────
 // Orthographic camera at ELEV degrees above the galactic (xz) plane
 // World: x = right, y = up (⊥ to galaxy), z = depth into scene
@@ -283,10 +307,16 @@ var masters = masterCfg.map(function (cfg, i) {
   drawGlow(glow, cfg.color, 50, 0.035);
   layers.masterGlow.addChild(glow);
 
-  var m = new PIXI.Graphics();
-  m.beginFill(cfg.color, 0.1); m.drawCircle(0, 0, 30); m.endFill();
-  m.beginFill(cfg.color);       m.drawCircle(0, 0, 16); m.endFill();
-  m.beginFill(0xffffff, 0.5);   m.drawCircle(0, 0, 6);  m.endFill();
+  var m = new PIXI.Container();
+  // Translucent halo
+  var mHalo = new PIXI.Graphics();
+  mHalo.beginFill(cfg.color, 0.08); mHalo.drawCircle(0, 0, 30); mHalo.endFill();
+  m.addChild(mHalo);
+  // 3D sphere body
+  var mBody = new PIXI.Sprite(sphereTex);
+  mBody.anchor.set(0.5); mBody.width = 32; mBody.height = 32;
+  mBody.tint = cfg.color;
+  m.addChild(mBody);
 
   m._glow = glow;
   m._label = cfg.label;
@@ -407,11 +437,22 @@ poolDefs.forEach(function (def) {
   // ── Nodes (Kepler 3D orbits) ──
   var nCount = randI(3, 7);
   for (var n = 0; n < nCount; n++) {
-    var node = new PIXI.Graphics();
+    var node = new PIXI.Container();
     var nr = rand(8, 15);
-    node.beginFill(0x1f2937); node.drawCircle(0, 0, nr); node.endFill();
-    node.lineStyle(1, def.color, 0.45); node.drawCircle(0, 0, nr);
-    node.beginFill(def.color, 0.35); node.drawCircle(0, 0, 3); node.endFill();
+    // Dark sphere body
+    var nBody = new PIXI.Sprite(sphereTex);
+    nBody.anchor.set(0.5); nBody.width = nr * 2; nBody.height = nr * 2;
+    nBody.tint = 0x2a3f55;
+    node.addChild(nBody);
+    // Colored rim ring
+    var nRing = new PIXI.Graphics();
+    nRing.lineStyle(1.2, def.color, 0.5); nRing.drawCircle(0, 0, nr);
+    node.addChild(nRing);
+    // Center highlight sphere
+    var nCenter = new PIXI.Sprite(sphereTex);
+    nCenter.anchor.set(0.5); nCenter.width = 7; nCenter.height = 7;
+    nCenter.tint = def.color;
+    node.addChild(nCenter);
 
     var nodeDist = rand(16, pool.r * 0.55);
     node._orb = {
@@ -464,10 +505,11 @@ poolDefs.forEach(function (def) {
     totalPods++;
 
     var ns = pickNamespace();
-    var pod = new PIXI.Graphics();
     var ps = rand(1.5, 4);
     var col = statusColor(status);
-    pod.beginFill(col); pod.drawCircle(0, 0, ps); pod.endFill();
+    var pod = new PIXI.Sprite(sphereTex);
+    pod.anchor.set(0.5); pod.width = ps * 2; pod.height = ps * 2;
+    pod.tint = col;
 
     var podDist = rand(pool.r * 0.15, pool.r + 32);
     pod._orb = {
@@ -877,9 +919,11 @@ app.ticker.add(function (delta) {
       pod.x = pProj.sx;
       pod.y = pProj.sy;
       pod.zIndex = Math.round(pProj.depth * 10);
-      if (pod._glow) { pod._glow.x = pProj.sx; pod._glow.y = pProj.sy; }
-      if (pod._status === 'error' || pod._status === 'oomkilled') {
-        pod.scale.set(1 + Math.sin(t / 150) * 0.35);
+      if (pod._glow) {
+        pod._glow.x = pProj.sx; pod._glow.y = pProj.sy;
+        // Pulse the glow halo, not the sphere body
+        pod._glow.scale.set(1 + Math.sin(t / 200) * 0.6);
+        pod._glow.alpha = 0.4 + Math.sin(t / 200) * 0.4;
       }
       if (pod._status === 'highcpu') {
         pod.alpha = 0.6 + Math.sin(t / 80) * 0.4;
